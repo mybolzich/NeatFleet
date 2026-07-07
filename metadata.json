@@ -1,0 +1,6 @@
+{
+  "name": "RouteManager",
+  "description": "An interactive, high-fidelity route optimization and dispatch system with AI-driven analytics, real-time simulation, and fully functional VRPTW optimizer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
