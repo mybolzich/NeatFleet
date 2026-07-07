@@ -22,6 +22,9 @@ import { FleetManager } from './components/FleetManager';
 import { OrderBook } from './components/OrderBook';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { AICopilot } from './components/AICopilot';
+import { AuthScreen } from './components/AuthScreen';
+import { useAuth } from './lib/useAuth';
+import { useCloudSync } from './lib/useCloudSync';
 
 // Initial baseline Depot and Traffic zones
 const CENTRAL_DEPOT: Depot = { x: 50, y: 50, address: 'Central Metro Depot, Main Ave' };
@@ -167,10 +170,20 @@ const INITIAL_STOPS: Stop[] = [
 ];
 
 export default function App() {
+  const auth = useAuth();
+
   const [stops, setStops] = useState<Stop[]>(INITIAL_STOPS);
   const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
   const [depot, setDepot] = useState<Depot>(CENTRAL_DEPOT);
   const [trafficZones, setTrafficZones] = useState<TrafficZone[]>(INITIAL_TRAFFIC);
+
+  useCloudSync(
+    auth.company?.$id || null,
+    stops, setStops,
+    vehicles, setVehicles,
+    depot, setDepot,
+    trafficZones, setTrafficZones,
+  );
 
   // Optimizer parameters
   const [config, setConfig] = useState<OptimizerConfig>({
@@ -549,6 +562,18 @@ export default function App() {
     downloadAnchor.remove();
   };
 
+  if (auth.loading) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-slate-50">
+        <div className="text-slate-400 text-sm">Loading…</div>
+      </div>
+    );
+  }
+
+  if (!auth.company) {
+    return <AuthScreen auth={auth} />;
+  }
+
   return (
     <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans select-none overflow-hidden antialiased">
       {/* 1. Global Navigation Header */}
@@ -595,6 +620,19 @@ export default function App() {
             <Download className="w-4 h-4" />
             <span>Export Route Data</span>
           </button>
+
+          <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
+            <div className="text-right">
+              <div className="text-xs font-bold text-slate-900">{auth.company?.name}</div>
+              <div className="text-[10px] text-slate-500">{auth.profile?.fullName} · {auth.profile?.role}</div>
+            </div>
+            <button
+              onClick={() => auth.logout()}
+              className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
