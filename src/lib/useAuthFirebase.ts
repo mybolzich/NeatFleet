@@ -71,59 +71,79 @@ export function useAuthFirebase() {
     console.log('[AUTH] Setting up Firebase auth listener');
 
     const unsubscribe = onAuthStateChanged(firebaseAuth, async (user) => {
-      console.log('[AUTH] Auth state changed:', user?.email || 'logged out');
-      setAuthUser(user);
-
-      if (user) {
-        try {
-          const { db: firestore } = initFirebase();
-
-          // Load user profile from Firestore
-          console.log('[AUTH] Loading user profile...');
-          const userDocRef = doc(firestore, 'neatfleet_users', user.uid);
-          const userDocSnap = await getDoc(userDocRef);
-
-          if (userDocSnap.exists()) {
-            const userData = userDocSnap.data();
-            const userProfile: UserProfile = {
-              $id: user.uid,
-              email: user.email || '',
-              fullName: userData.fullName || user.displayName || '',
-              role: userData.role || 'driver',
-              companyId: userData.companyId,
-            };
-            setProfile(userProfile);
-
-            // Load company profile
-            console.log('[AUTH] Loading company profile...');
-            const companyDocRef = doc(firestore, 'neatfleet_companies', userData.companyId);
-            const companyDocSnap = await getDoc(companyDocRef);
-
-            if (companyDocSnap.exists()) {
-              const companyData = companyDocSnap.data();
-              const companyProfile: CompanyProfile = {
-                $id: userData.companyId,
-                name: companyData.name,
-                slug: companyData.slug,
-                dispatchLat: companyData.dispatchLat,
-                dispatchLng: companyData.dispatchLng,
-                dispatchAddress: companyData.dispatchAddress || '',
-              };
-              setCompany(companyProfile);
-            }
-          }
-        } catch (err) {
-          console.error('[AUTH] Error loading profile:', err);
-        }
-      } else {
-        setCompany(null);
+      console.log('[AUTH] Auth state changed:', user?.email || 'logged out', 'at', new Date().toISOString());
+      
+      if (!user) {
+        console.log('[AUTH] User logged out - clearing state');
+        setAuthUser(null);
         setProfile(null);
+        setCompany(null);
+        setLoading(false);
+        return;
       }
 
-      setLoading(false);
+      console.log('[AUTH] User logged in:', user.uid);
+      setAuthUser(user);
+
+      try {
+        const { db: firestore } = initFirebase();
+
+        // Load user profile from Firestore
+        console.log('[AUTH] Loading user profile from Firestore...');
+        const userDocRef = doc(firestore, 'neatfleet_users', user.uid);
+        const userDocSnap = await getDoc(userDocRef);
+        console.log('[AUTH] User doc exists?', userDocSnap.exists());
+
+        if (userDocSnap.exists()) {
+          const userData = userDocSnap.data();
+          console.log('[AUTH] User data:', userData);
+          
+          const userProfile: UserProfile = {
+            $id: user.uid,
+            email: user.email || '',
+            fullName: userData.fullName || user.displayName || '',
+            role: userData.role || 'driver',
+            companyId: userData.companyId,
+          };
+          setProfile(userProfile);
+          console.log('[AUTH] Profile set:', userProfile);
+
+          // Load company profile
+          console.log('[AUTH] Loading company profile...');
+          const companyDocRef = doc(firestore, 'neatfleet_companies', userData.companyId);
+          const companyDocSnap = await getDoc(companyDocRef);
+          console.log('[AUTH] Company doc exists?', companyDocSnap.exists());
+
+          if (companyDocSnap.exists()) {
+            const companyData = companyDocSnap.data();
+            const companyProfile: CompanyProfile = {
+              $id: userData.companyId,
+              name: companyData.name,
+              slug: companyData.slug,
+              dispatchLat: companyData.dispatchLat,
+              dispatchLng: companyData.dispatchLng,
+              dispatchAddress: companyData.dispatchAddress || '',
+            };
+            setCompany(companyProfile);
+            console.log('[AUTH] Company set:', companyProfile);
+          } else {
+            console.warn('[AUTH] Company document not found');
+          }
+        } else {
+          console.warn('[AUTH] User document not found in Firestore');
+        }
+      } catch (err) {
+        console.error('[AUTH] Error loading profile:', err);
+      } finally {
+        console.log('[AUTH] Setting loading=false');
+        setLoading(false);
+      }
     });
 
-    return () => unsubscribe();
+    return () => {
+      console.log('[AUTH] Cleaning up auth listener');
+      unsubscribe();
+    };
   }, []);
 
   const registerCompany = useCallback(
