@@ -17,9 +17,7 @@ export const COLLECTIONS = {
 
 const client = new Client()
   .setEndpoint(APPWRITE_ENDPOINT)
-  .setProject(APPWRITE_PROJECT_ID)
-  // Explicitly set self-signed to false and allow credentials
-  .setSelfSigned(false);
+  .setProject(APPWRITE_PROJECT_ID);
 
 export const account = new Account(client);
 export const databases = new Databases(client);
