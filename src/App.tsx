@@ -23,7 +23,7 @@ import { OrderBook } from './components/OrderBook';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { AICopilot } from './components/AICopilot';
 import { AuthScreen } from './components/AuthScreen';
-import { useAuth } from './lib/useAuth';
+import { useAuthFirebase } from './lib/useAuthFirebase';
 import { useCloudSync } from './lib/useCloudSync';
 
 // Initial baseline Depot and Traffic zones
@@ -170,7 +170,7 @@ const INITIAL_STOPS: Stop[] = [
 ];
 
 export default function App() {
-  const auth = useAuth();
+  const auth = useAuthFirebase();
 
   const [stops, setStops] = useState<Stop[]>(INITIAL_STOPS);
   const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);

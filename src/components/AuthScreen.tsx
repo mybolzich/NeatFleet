@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { Truck, Loader2 } from 'lucide-react';
-import { useAuth } from '../lib/useAuth';
+import { useAuthFirebase } from '../lib/useAuthFirebase';
 
 interface AuthScreenProps {
-  auth: ReturnType<typeof useAuth>;
+  auth: ReturnType<typeof useAuthFirebase>;
 }
 
 export function AuthScreen({ auth }: AuthScreenProps) {
