@@ -1,754 +1,392 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
-  Compass,
-  Play,
-  Pause,
-  RotateCcw,
-  FastForward,
-  Activity,
-  Truck,
-  ShoppingBag,
-  BarChart,
-  Sparkles,
-  RefreshCw,
-  Sliders,
-  HelpCircle,
-  Download
+  Truck, MapPin, BarChart2, Download, Calendar,
+  Play, CheckCircle2, Send, RotateCcw, Plus,
+  ChevronDown, ChevronRight, GripVertical, Trash2,
+  AlertTriangle, Clock, Package, User, LogOut,
+  Layers, Settings, RefreshCw, Navigation, Route
 } from 'lucide-react';
-import { Stop, Vehicle, Depot, TrafficZone, OptimizerConfig, SimulationState } from './types';
+import { Stop, Vehicle, Depot, TrafficZone, OptimizerConfig } from './types';
 import { optimizeRoutes } from './utils/optimizer';
 import { InteractiveMap } from './components/InteractiveMap';
-import { FleetManager } from './components/FleetManager';
 import { OrderBook } from './components/OrderBook';
+import { FleetManager } from './components/FleetManager';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
-import { AICopilot } from './components/AICopilot';
 import { AuthScreen } from './components/AuthScreen';
 import { useAuthFirebase } from './lib/useAuthFirebase';
 import { useCloudSync } from './lib/useCloudSync';
 
-// Initial baseline Depot and Traffic zones
-const CENTRAL_DEPOT: Depot = { x: 50, y: 50, lat: 28.1518, lng: -82.3743, address: 'Tampa, FL (Cornerstone Dispatch)' };
+// ── Constants ─────────────────────────────────────────────────────────────
+const CENTRAL_DEPOT: Depot = {
+  x: 50, y: 50,
+  lat: 28.1518, lng: -82.3743,
+  address: 'Tampa, FL (Cornerstone Dispatch)'
+};
 
-const INITIAL_TRAFFIC: TrafficZone[] = [
-  { id: 't1', name: 'Downtown Congestion', x: 50, y: 50, radius: 18, delayFactor: 2.2 },
-  { id: 't2', name: 'North Highway Toll Road', x: 75, y: 25, radius: 12, delayFactor: 1.6 },
-];
+const CREW_COLORS = ['#38bdf8','#fb7185','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#84cc16'];
 
 const INITIAL_VEHICLES: Vehicle[] = [
-  {
-    id: 'v1',
-    name: 'Rapid Van A',
-    capacity: 120,
-    shiftStart: 0,
-    shiftEnd: 480,
-    costPerMile: 1.2,
-    costPerHour: 15.0,
-    color: '#38bdf8', // sky-400
-    speed: 1.6,
-    status: 'Idle',
-    metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-  },
-  {
-    id: 'v2',
-    name: 'Heavy Truck B',
-    capacity: 250,
-    shiftStart: 0,
-    shiftEnd: 480,
-    costPerMile: 2.1,
-    costPerHour: 22.0,
-    color: '#fb7185', // rose-400
-    speed: 1.1,
-    status: 'Idle',
-    metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-  },
-  {
-    id: 'v3',
-    name: 'Eco Transit C',
-    capacity: 80,
-    shiftStart: 30, // Starts at 8:30 AM
-    shiftEnd: 480,
-    costPerMile: 0.9,
-    costPerHour: 14.0,
-    color: '#10b981', // emerald-500
-    speed: 1.8,
-    status: 'Idle',
-    metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-  },
+  { id: 'v1', name: 'Crew LM1 — Neri',    capacity: 120, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 15, color: CREW_COLORS[0], speed: 1.6, status: 'Idle', metrics: { totalDistance:0,totalTime:0,loadUsed:0,delayCount:0,totalCost:0 } },
+  { id: 'v2', name: 'Crew LM2 — Mateos',  capacity: 120, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 15, color: CREW_COLORS[1], speed: 1.5, status: 'Idle', metrics: { totalDistance:0,totalTime:0,loadUsed:0,delayCount:0,totalCost:0 } },
+  { id: 'v3', name: 'Crew LM3 — Erick',   capacity: 120, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 15, color: CREW_COLORS[2], speed: 1.5, status: 'Idle', metrics: { totalDistance:0,totalTime:0,loadUsed:0,delayCount:0,totalCost:0 } },
+  { id: 'v4', name: 'Crew LM4 — Luis',    capacity: 120, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 15, color: CREW_COLORS[3], speed: 1.5, status: 'Idle', metrics: { totalDistance:0,totalTime:0,loadUsed:0,delayCount:0,totalCost:0 } },
+  { id: 'v5', name: 'Crew LM5 — Mario',   capacity: 120, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 15, color: CREW_COLORS[4], speed: 1.5, status: 'Idle', metrics: { totalDistance:0,totalTime:0,loadUsed:0,delayCount:0,totalCost:0 } },
 ];
 
-const INITIAL_STOPS: Stop[] = [
-  {
-    id: 's1',
-    name: 'Market Square Mall',
-    customer: 'Target Stores Inc',
-    x: 35,
-    y: 30,
-    address: '450 Market Sq, Downtown',
-    volume: 35,
-    timeWindowStart: 30, // 8:30 AM
-    timeWindowEnd: 150, // 10:30 AM
-    serviceDuration: 25,
-    priority: 'High',
-    status: 'Pending',
-    assignedVehicleId: null,
-    stopSequence: null,
-    eta: null,
-    arrivalTime: null,
-  },
-  {
-    id: 's2',
-    name: 'Broad St Pharmacy',
-    customer: 'CVS Healthcare',
-    x: 65,
-    y: 40,
-    address: '902 Broad St, East Core',
-    volume: 15,
-    timeWindowStart: 60, // 9:00 AM
-    timeWindowEnd: 180, // 11:00 AM
-    serviceDuration: 15,
-    priority: 'Medium',
-    status: 'Pending',
-    assignedVehicleId: null,
-    stopSequence: null,
-    eta: null,
-    arrivalTime: null,
-  },
-  {
-    id: 's3',
-    name: 'Riverside Warehouse',
-    customer: 'Genco Logistics',
-    x: 80,
-    y: 70,
-    address: '14 River Rd, Outer East',
-    volume: 90,
-    timeWindowStart: 90, // 9:30 AM
-    timeWindowEnd: 300, // 1:00 PM
-    serviceDuration: 40,
-    priority: 'High',
-    status: 'Pending',
-    assignedVehicleId: null,
-    stopSequence: null,
-    eta: null,
-    arrivalTime: null,
-  },
-  {
-    id: 's4',
-    name: 'Midtown Grocery',
-    customer: 'Whole Foods Market',
-    x: 25,
-    y: 65,
-    address: '12 Midtown Plaza, West Core',
-    volume: 45,
-    timeWindowStart: 120, // 10:00 AM
-    timeWindowEnd: 240, // 12:00 PM
-    serviceDuration: 20,
-    priority: 'Low',
-    status: 'Pending',
-    assignedVehicleId: null,
-    stopSequence: null,
-    eta: null,
-    arrivalTime: null,
-  },
-  {
-    id: 's5',
-    name: 'Silicon Labs Hub',
-    customer: 'Google Corp',
-    x: 45,
-    y: 85,
-    address: '101 Google Way, South Campus',
-    volume: 60,
-    timeWindowStart: 180, // 11:00 AM
-    timeWindowEnd: 360, // 2:00 PM
-    serviceDuration: 30,
-    priority: 'Medium',
-    status: 'Pending',
-    assignedVehicleId: null,
-    stopSequence: null,
-    eta: null,
-    arrivalTime: null,
-  },
-];
+const INITIAL_TRAFFIC: TrafficZone[] = [];
 
+type AppTab = 'orders' | 'routes' | 'fleet' | 'settings';
+type RouteStatus = 'unbuilt' | 'built' | 'dispatched';
+
+// ── Helpers ───────────────────────────────────────────────────────────────
+const fmtTime = (mins: number) => {
+  const h = Math.floor(mins / 60) + 8;
+  const m = mins % 60;
+  const ampm = h < 12 ? 'AM' : 'PM';
+  return `${String(h > 12 ? h - 12 : h).padStart(2,'0')}:${String(m).padStart(2,'0')} ${ampm}`;
+};
+
+const today = () => new Date().toLocaleDateString('en-US', { weekday:'short', month:'short', day:'numeric', year:'numeric' });
+
+// ── Main App ──────────────────────────────────────────────────────────────
 export default function App() {
   const auth = useAuthFirebase();
 
-  const [stops, setStops] = useState<Stop[]>(INITIAL_STOPS);
-  const [vehicles, setVehicles] = useState<Vehicle[]>(INITIAL_VEHICLES);
-  const [depot, setDepot] = useState<Depot>(CENTRAL_DEPOT);
-  const [trafficZones, setTrafficZones] = useState<TrafficZone[]>(INITIAL_TRAFFIC);
+  const [stops, setStops]           = useState<Stop[]>([]);
+  const [vehicles, setVehicles]     = useState<Vehicle[]>(INITIAL_VEHICLES);
+  const [depot]                     = useState<Depot>(CENTRAL_DEPOT);
+  const [trafficZones]              = useState<TrafficZone[]>(INITIAL_TRAFFIC);
+  const [config, setConfig]         = useState<OptimizerConfig>({ minimizeVehicles: false, timeWindowWeight: 4, capacityWeight: 5, trafficAware: true });
 
-  useCloudSync(
-    auth.company?.$id || null,
-    stops, setStops,
-    vehicles, setVehicles,
-    depot, setDepot,
-    trafficZones, setTrafficZones,
-  );
-
-  // Optimizer parameters
-  const [config, setConfig] = useState<OptimizerConfig>({
-    minimizeVehicles: false,
-    timeWindowWeight: 4,
-    capacityWeight: 5,
-    trafficAware: true,
-  });
-
-  // Selected elements for highlight
+  const [tab, setTab]               = useState<AppTab>('orders');
+  const [routeStatus, setRouteStatus] = useState<RouteStatus>('unbuilt');
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [expandedCrews, setExpandedCrews] = useState<Set<string>>(new Set(['v1']));
+  const [serviceDate, setServiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
+  const [building, setBuilding]     = useState(false);
 
-  // Active side-view tabs
-  const [leftTab, setLeftTab] = useState<'orders' | 'fleet'>('orders');
-  const [rightTab, setRightTab] = useState<'analytics' | 'copilot'>('analytics');
+  // Cloud sync (localStorage MVP)
+  const companyId = auth.company?.$id ?? null;
+  useCloudSync(companyId, stops, setStops, vehicles, setVehicles, depot, () => {}, trafficZones, () => {});
 
-  // Simulation parameters
-  const [simulationTime, setSimulationTime] = useState<number>(0); // mins from 8:00 AM (0 to 480)
-  const [isSimulating, setIsSimulating] = useState<boolean>(false);
-  const [simSpeed, setSimSpeed] = useState<number>(1); // real-time factor
-  const simIntervalRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Trigger solver optimization run automatically on data adjustments
-  const triggerOptimization = () => {
-    const { optimizedStops, optimizedVehicles } = optimizeRoutes(
-      stops,
-      vehicles,
-      depot,
-      trafficZones,
-      config
-    );
-    setStops(optimizedStops);
-    setVehicles(optimizedVehicles);
-  };
-
-  // Perform initial route optimization upon boot
-  useEffect(() => {
-    triggerOptimization();
-  }, [config, depot, trafficZones]);
-
-  // Simulation ticks loop
-  useEffect(() => {
-    if (isSimulating) {
-      simIntervalRef.current = setInterval(() => {
-        setSimulationTime((prev) => {
-          if (prev >= 480) {
-            setIsSimulating(false);
-            return 480;
-          }
-          return prev + simSpeed;
-        });
-      }, 100);
-    } else {
-      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
-    }
-
-    return () => {
-      if (simIntervalRef.current) clearInterval(simIntervalRef.current);
-    };
-  }, [isSimulating, simSpeed]);
-
-  // Handle Stop/Order modifications
-  const handleAddStop = (newStop: Omit<Stop, 'id' | 'status' | 'assignedVehicleId' | 'stopSequence' | 'eta' | 'arrivalTime'>) => {
+  // ── Stop CRUD ────────────────────────────────────────────────────────────
+  const handleAddStop = useCallback((newStop: Omit<Stop,'id'|'status'|'assignedVehicleId'|'stopSequence'|'eta'|'arrivalTime'>) => {
     const stop: Stop = {
       ...newStop,
-      id: `s-${Date.now()}`,
+      id: `s_${Date.now()}`,
       status: 'Pending',
       assignedVehicleId: null,
       stopSequence: null,
       eta: null,
       arrivalTime: null,
     };
-    setStops((prev) => {
-      const updated = [...prev, stop];
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(updated, vehicles, depot, trafficZones, config);
-      setVehicles(optimizedVehicles);
-      return optimizedStops;
-    });
-  };
+    setStops(prev => [...prev, stop]);
+    setRouteStatus('unbuilt');
+  }, []);
 
-  const handleUpdateStopCoords = (id: string, x: number, y: number) => {
-    setStops((prev) => {
-      const updated = prev.map((s) => (s.id === id ? { ...s, x, y } : s));
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(updated, vehicles, depot, trafficZones, config);
-      setVehicles(optimizedVehicles);
-      return optimizedStops;
-    });
-  };
-
-  const handleDeleteStop = (id: string) => {
-    setStops((prev) => {
-      const updated = prev.filter((s) => s.id !== id);
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(updated, vehicles, depot, trafficZones, config);
-      setVehicles(optimizedVehicles);
-      return optimizedStops;
-    });
+  const handleDeleteStop = useCallback((id: string) => {
+    setStops(prev => prev.filter(s => s.id !== id));
     if (selectedStopId === id) setSelectedStopId(null);
-  };
+    setRouteStatus('unbuilt');
+  }, [selectedStopId]);
 
-  const handleClearAllStops = () => {
+  const handleClearAllStops = useCallback(() => {
     setStops([]);
-    setVehicles(prev => prev.map(v => ({
-      ...v,
-      metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 }
-    })));
-    setSelectedStopId(null);
-  };
+    setRouteStatus('unbuilt');
+  }, []);
 
-  // Add click to map coordinates handler
-  const handleMapClickAdd = (x: number, y: number) => {
-    handleAddStop({
-      name: `Drop #${stops.length + 1}`,
-      customer: `Merchant Vendor #${Math.floor(Math.random() * 80) + 10}`,
-      address: `${Math.floor(Math.random() * 900) + 100} Elm St`,
-      volume: Math.floor(Math.random() * 25) + 10,
-      timeWindowStart: 60, // 9AM
-      timeWindowEnd: 300, // 1PM
-      serviceDuration: 15,
+  const handleMapClickAdd = useCallback((x: number, y: number) => {
+    // Map click creates a placeholder stop (user fills details in Orders panel)
+    const stop: Stop = {
+      id: `s_${Date.now()}`,
+      name: `Stop ${stops.length + 1}`,
+      customer: 'New Customer',
+      x, y,
+      address: 'Address pending',
+      volume: 10,
+      timeWindowStart: 0,
+      timeWindowEnd: 480,
+      serviceDuration: 20,
       priority: 'Medium',
-      x,
-      y,
-    });
-  };
-
-  // Handle Fleet/Vehicle modifications
-  const handleAddVehicle = (newVehicle: Omit<Vehicle, 'id' | 'status' | 'metrics'>) => {
-    const vehicle: Vehicle = {
-      ...newVehicle,
-      id: `v-${Date.now()}`,
-      status: 'Idle',
-      metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
+      status: 'Pending',
+      assignedVehicleId: null,
+      stopSequence: null,
+      eta: null,
+      arrivalTime: null,
     };
-    setVehicles((prev) => {
-      const updated = [...prev, vehicle];
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(stops, updated, depot, trafficZones, config);
-      setStops(optimizedStops);
-      return optimizedVehicles;
-    });
-  };
+    setStops(prev => [...prev, stop]);
+    setSelectedStopId(stop.id);
+    setTab('orders');
+    setRouteStatus('unbuilt');
+  }, [stops.length]);
 
+  const handleUpdateStopCoords = useCallback((id: string, x: number, y: number) => {
+    setStops(prev => prev.map(s => s.id === id ? { ...s, x, y } : s));
+    setRouteStatus('unbuilt');
+  }, []);
+
+  // ── Vehicle CRUD ─────────────────────────────────────────────────────────
+  const handleAddVehicle = (v: Omit<Vehicle,'id'|'status'|'metrics'>) => {
+    setVehicles(prev => [...prev, {
+      ...v, id: `v_${Date.now()}`, status: 'Idle',
+      metrics: { totalDistance:0, totalTime:0, loadUsed:0, delayCount:0, totalCost:0 },
+    }]);
+  };
   const handleUpdateVehicle = (id: string, updates: Partial<Vehicle>) => {
-    setVehicles((prev) => {
-      const updated = prev.map((v) => (v.id === id ? { ...v, ...updates } : v));
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(stops, updated, depot, trafficZones, config);
-      setStops(optimizedStops);
-      return optimizedVehicles;
-    });
+    setVehicles(prev => prev.map(v => v.id === id ? { ...v, ...updates } : v));
   };
-
   const handleDeleteVehicle = (id: string) => {
-    if (vehicles.length <= 1) return;
-    setVehicles((prev) => {
-      const updated = prev.filter((v) => v.id !== id);
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(stops, updated, depot, trafficZones, config);
-      setStops(optimizedStops);
-      return optimizedVehicles;
+    setVehicles(prev => prev.filter(v => v.id !== id));
+  };
+
+  // ── Build Routes ─────────────────────────────────────────────────────────
+  const handleBuildRoutes = useCallback(async () => {
+    if (stops.length === 0) return;
+    setBuilding(true);
+    await new Promise(r => setTimeout(r, 600)); // brief visual feedback
+    const { optimizedStops, optimizedVehicles } = optimizeRoutes(stops, vehicles, depot, trafficZones, config);
+    setStops(optimizedStops);
+    setVehicles(optimizedVehicles);
+    setRouteStatus('built');
+    setTab('routes');
+    setBuilding(false);
+    // Auto-expand all crews with stops
+    const withStops = new Set(optimizedStops.filter(s => s.assignedVehicleId).map(s => s.assignedVehicleId!));
+    setExpandedCrews(withStops);
+  }, [stops, vehicles, depot, trafficZones, config]);
+
+  // ── Dispatch ─────────────────────────────────────────────────────────────
+  const handleDispatch = useCallback(() => {
+    if (routeStatus !== 'built') return;
+    setRouteStatus('dispatched');
+    setVehicles(prev => prev.map(v =>
+      v.metrics.loadUsed > 0 ? { ...v, status: 'Active' } : v
+    ));
+    setStops(prev => prev.map(s =>
+      s.assignedVehicleId ? { ...s, status: 'In Transit' } : s
+    ));
+  }, [routeStatus]);
+
+  // ── Reset ─────────────────────────────────────────────────────────────────
+  const handleReset = useCallback(() => {
+    setStops(prev => prev.map(s => ({
+      ...s, assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null, status: 'Pending'
+    })));
+    setVehicles(prev => prev.map(v => ({
+      ...v, status: 'Idle',
+      metrics: { totalDistance:0, totalTime:0, loadUsed:0, delayCount:0, totalCost:0 }
+    })));
+    setRouteStatus('unbuilt');
+  }, []);
+
+  // ── Export CSV ────────────────────────────────────────────────────────────
+  const handleExportCSV = useCallback(() => {
+    const header = 'Crew,Stop #,Customer,Address,Arrival,Window Open,Window Close,Service (min),Status\n';
+    const rows = vehicles.flatMap(v => {
+      const assigned = stops
+        .filter(s => s.assignedVehicleId === v.id)
+        .sort((a, b) => (a.stopSequence ?? 0) - (b.stopSequence ?? 0));
+      return assigned.map((s, i) =>
+        `"${v.name}",${i+1},"${s.customer}","${s.address}",${s.eta !== null ? fmtTime(s.eta) : 'TBD'},${fmtTime(s.timeWindowStart)},${fmtTime(s.timeWindowEnd)},${s.serviceDuration},${s.status}`
+      );
     });
-    if (selectedVehicleId === id) setSelectedVehicleId(null);
+    const csv = header + rows.join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `route_${serviceDate}.csv`;
+    a.click();
+  }, [stops, vehicles, serviceDate]);
+
+  // ── Drag-reorder stop between crews ──────────────────────────────────────
+  const dragStopRef = useRef<{ stopId: string; fromVehicleId: string | null } | null>(null);
+
+  const handleDragStart = (stopId: string, fromVehicleId: string | null) => {
+    dragStopRef.current = { stopId, fromVehicleId };
   };
 
-  // Preset dispatcher scenarios
-  const handleLoadPreset = (presetName: string) => {
-    // Stop simulation
-    setIsSimulating(false);
-    setSimulationTime(0);
-
-    if (presetName === 'downtown') {
-      // Small core radius, heavy traffic congestion, tight windows
-      setDepot({ x: 50, y: 50, address: 'Central Downtown Core Depot' });
-      setTrafficZones([
-        { id: 't1', name: 'Broadway Rush Traffic', x: 50, y: 50, radius: 24, delayFactor: 2.8 },
-      ]);
-      setVehicles([
-        {
-          id: 'v1',
-          name: 'City Courier Alpha',
-          capacity: 100,
-          shiftStart: 0,
-          shiftEnd: 480,
-          costPerMile: 1.1,
-          costPerHour: 14.0,
-          color: '#38bdf8',
-          speed: 1.5,
-          status: 'Idle',
-          metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-        },
-        {
-          id: 'v2',
-          name: 'City Courier Beta',
-          capacity: 100,
-          shiftStart: 0,
-          shiftEnd: 480,
-          costPerMile: 1.1,
-          costPerHour: 14.0,
-          color: '#fb7185',
-          speed: 1.5,
-          status: 'Idle',
-          metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-        },
-      ]);
-      const newStops: Stop[] = [
-        { id: 's1', name: 'Broadway Plaza', customer: 'Macys Dept', x: 42, y: 45, address: '14 Broadway Ave', volume: 20, timeWindowStart: 0, timeWindowEnd: 90, serviceDuration: 15, priority: 'High', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's2', name: 'Commerce Towers', customer: 'Chase Corp', x: 58, y: 52, address: '88 Wall St', volume: 15, timeWindowStart: 30, timeWindowEnd: 120, serviceDuration: 15, priority: 'Medium', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's3', name: 'Federal Court Office', customer: 'US Postal Service', x: 52, y: 38, address: '2 Constitution Sq', volume: 25, timeWindowStart: 60, timeWindowEnd: 150, serviceDuration: 20, priority: 'High', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's4', name: 'Convention Center', customer: 'Catering Partners', x: 38, y: 58, address: '404 Exhibit Blvd', volume: 40, timeWindowStart: 60, timeWindowEnd: 180, serviceDuration: 25, priority: 'Medium', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's5', name: 'Fashion District Boutique', customer: 'Zara Apparel', x: 48, y: 62, address: '900 Retail Row', volume: 18, timeWindowStart: 120, timeWindowEnd: 240, serviceDuration: 15, priority: 'Low', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-      ];
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(newStops, [
-        {
-          id: 'v1',
-          name: 'City Courier Alpha',
-          capacity: 100,
-          shiftStart: 0,
-          shiftEnd: 480,
-          costPerMile: 1.1,
-          costPerHour: 14.0,
-          color: '#38bdf8',
-          speed: 1.5,
-          status: 'Idle',
-          metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-        },
-        {
-          id: 'v2',
-          name: 'City Courier Beta',
-          capacity: 100,
-          shiftStart: 0,
-          shiftEnd: 480,
-          costPerMile: 1.1,
-          costPerHour: 14.0,
-          color: '#fb7185',
-          speed: 1.5,
-          status: 'Idle',
-          metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-        },
-      ], { x: 50, y: 50, address: 'Central Downtown Core Depot' }, [
-        { id: 't1', name: 'Broadway Rush Traffic', x: 50, y: 50, radius: 24, delayFactor: 2.8 },
-      ], config);
-      setStops(optimizedStops);
-      setVehicles(optimizedVehicles);
-    } else if (presetName === 'suburban') {
-      // Spread out stops, peripheral depot, large cargo volume
-      setDepot({ x: 10, y: 10, address: 'Western Manufacturing Hub' });
-      setTrafficZones([]);
-      const fleet: Vehicle[] = [
-        {
-          id: 'v1',
-          name: 'Heavy Duty Truck X',
-          capacity: 200,
-          shiftStart: 0,
-          shiftEnd: 480,
-          costPerMile: 2.5,
-          costPerHour: 24.0,
-          color: '#38bdf8',
-          speed: 1.3,
-          status: 'Idle',
-          metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-        },
-        {
-          id: 'v2',
-          name: 'Heavy Duty Truck Y',
-          capacity: 200,
-          shiftStart: 0,
-          shiftEnd: 480,
-          costPerMile: 2.5,
-          costPerHour: 24.0,
-          color: '#f43f5e',
-          speed: 1.3,
-          status: 'Idle',
-          metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
-        },
-      ];
-      const suburbanStops: Stop[] = [
-        { id: 's1', name: 'Eastside Industrial Park', customer: 'Boeing Aerospace', x: 85, y: 75, address: '100 Terminal Way', volume: 110, timeWindowStart: 60, timeWindowEnd: 300, serviceDuration: 30, priority: 'High', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's2', name: 'North Creek Retail Hub', customer: 'Walmart Supercenter', x: 75, y: 20, address: '500 Commerce Rd', volume: 80, timeWindowStart: 30, timeWindowEnd: 240, serviceDuration: 25, priority: 'Medium', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's3', name: 'Valley Logistics Terminal', customer: 'FedEx SmartPost', x: 20, y: 80, address: '88 Industrial Blvd', volume: 90, timeWindowStart: 0, timeWindowEnd: 180, serviceDuration: 20, priority: 'Medium', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's4', name: 'Lakeside Tech Complex', customer: 'Microsoft Corp', x: 90, y: 30, address: '999 Lakeside Dr', volume: 60, timeWindowStart: 120, timeWindowEnd: 360, serviceDuration: 15, priority: 'Low', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-      ];
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(suburbanStops, fleet, { x: 10, y: 10, address: 'Western Manufacturing Hub' }, [], config);
-      setStops(optimizedStops);
-      setVehicles(optimizedVehicles);
-    } else if (presetName === 'windows') {
-      // High count of stops with highly restrictive overlapping time windows
-      setDepot({ x: 50, y: 50, address: 'Central Metro Depot' });
-      setTrafficZones([
-        { id: 't1', name: 'West Cross Traffic', x: 30, y: 50, radius: 10, delayFactor: 1.8 },
-      ]);
-      const fleet: Vehicle[] = [
-        { id: 'v1', name: 'Time Critical Van 1', capacity: 100, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 16.0, color: '#38bdf8', speed: 1.7, status: 'Idle', metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 } },
-        { id: 'v2', name: 'Time Critical Van 2', capacity: 100, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 16.0, color: '#fbbf24', speed: 1.7, status: 'Idle', metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 } },
-        { id: 'v3', name: 'Time Critical Van 3', capacity: 100, shiftStart: 0, shiftEnd: 480, costPerMile: 1.2, costPerHour: 16.0, color: '#a855f7', speed: 1.7, status: 'Idle', metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 } },
-      ];
-      const windowStops: Stop[] = [
-        { id: 's1', name: 'Medical Diagnostic Labs', customer: 'Quest Diagnostics', x: 20, y: 30, address: '12 Clinic Ave', volume: 10, timeWindowStart: 15, timeWindowEnd: 75, serviceDuration: 15, priority: 'High', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's2', name: 'Urgent Care Center', customer: 'Valley Health Clinic', x: 35, y: 70, address: '77 Urgent Dr', volume: 15, timeWindowStart: 15, timeWindowEnd: 90, serviceDuration: 20, priority: 'High', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's3', name: 'Airport Cargo Express', customer: 'DHL Air Operations', x: 85, y: 45, address: '9 Aviation Dr', volume: 40, timeWindowStart: 45, timeWindowEnd: 120, serviceDuration: 30, priority: 'High', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's4', name: 'Corporate Banking Block', customer: 'Bank of America', x: 60, y: 15, address: '44 Financial Pl', volume: 20, timeWindowStart: 90, timeWindowEnd: 150, serviceDuration: 15, priority: 'Medium', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's5', name: 'Tech Inc HQ', customer: 'Intel Corp Research', x: 70, y: 80, address: '500 Microchip Dr', volume: 25, timeWindowStart: 120, timeWindowEnd: 180, serviceDuration: 15, priority: 'Medium', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-      ];
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(windowStops, fleet, { x: 50, y: 50, address: 'Central Metro Depot' }, [
-        { id: 't1', name: 'West Cross Traffic', x: 30, y: 50, radius: 10, delayFactor: 1.8 },
-      ], config);
-      setStops(optimizedStops);
-      setVehicles(optimizedVehicles);
-    } else if (presetName === 'heavy-cargo') {
-      // Cargo sizes exceed truck capabilities, requiring smart load splits or consolidations
-      setDepot({ x: 50, y: 50, address: 'Central Bulk Cargo Depot' });
-      setTrafficZones([]);
-      const fleet: Vehicle[] = [
-        { id: 'v1', name: 'Super Loader Truck A', capacity: 150, shiftStart: 0, shiftEnd: 480, costPerMile: 2.8, costPerHour: 25.0, color: '#38bdf8', speed: 1.0, status: 'Idle', metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 } },
-        { id: 'v2', name: 'Compact Transit B', capacity: 60, shiftStart: 0, shiftEnd: 480, costPerMile: 1.0, costPerHour: 14.0, color: '#10b981', speed: 1.8, status: 'Idle', metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 } },
-      ];
-      const cargoStops: Stop[] = [
-        { id: 's1', name: 'Heavy Metal Foundry', customer: 'US Steel Yards', x: 20, y: 25, address: '3 Yard Rd', volume: 130, timeWindowStart: 30, timeWindowEnd: 240, serviceDuration: 40, priority: 'High', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's2', name: 'Chemical Supply Depot', customer: 'DuPont Dist', x: 80, y: 80, address: '12 Chem Way', volume: 55, timeWindowStart: 60, timeWindowEnd: 180, serviceDuration: 25, priority: 'Medium', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-        { id: 's3', name: 'Construction Site B', customer: 'Caterpillar Dev', x: 75, y: 30, address: '90 Builders Row', volume: 45, timeWindowStart: 120, timeWindowEnd: 300, serviceDuration: 15, priority: 'Low', status: 'Pending', assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null },
-      ];
-      const { optimizedStops, optimizedVehicles } = optimizeRoutes(cargoStops, fleet, { x: 50, y: 50, address: 'Central Bulk Cargo Depot' }, [], config);
-      setStops(optimizedStops);
-      setVehicles(optimizedVehicles);
-    }
+  const handleDropOnVehicle = (toVehicleId: string) => {
+    if (!dragStopRef.current) return;
+    const { stopId } = dragStopRef.current;
+    setStops(prev => prev.map(s => s.id === stopId ? { ...s, assignedVehicleId: toVehicleId } : s));
+    dragStopRef.current = null;
+    if (routeStatus === 'dispatched') setRouteStatus('built');
   };
 
-  const handleExportRouteData = () => {
-    const exportData = {
-      exportedAt: new Date().toISOString(),
-      depot: depot,
-      stops: stops.map(s => ({
-        id: s.id,
-        name: s.name,
-        customer: s.customer,
-        address: s.address,
-        volume: s.volume,
-        priority: s.priority,
-        coordinates: { x: s.x, y: s.y },
-        assignedVehicleId: s.assignedVehicleId,
-        stopSequence: s.stopSequence,
-        eta: s.eta !== null ? `${String(Math.floor(s.eta / 60) + 8).padStart(2, '0')}:${String(s.eta % 60).padStart(2, '0')}` : null,
-        status: s.status
-      })),
-      vehicles: vehicles.map(v => ({
-        id: v.id,
-        name: v.name,
-        capacity: v.capacity,
-        color: v.color,
-        speed: v.speed,
-        shift: `${String(Math.floor(v.shiftStart / 60) + 8).padStart(2, '0')}:${String(v.shiftStart % 60).padStart(2, '0')} - ${String(Math.floor(v.shiftEnd / 60) + 8).padStart(2, '0')}:${String(v.shiftEnd % 60).padStart(2, '0')}`,
-        metrics: {
-          totalDistance: v.metrics.totalDistance,
-          totalTimeMinutes: v.metrics.totalTime,
-          loadUsed: v.metrics.loadUsed,
-          capacityUtilization: `${Math.round((v.metrics.loadUsed / v.capacity) * 100)}%`,
-          delayCount: v.metrics.delayCount,
-          totalCostUSD: v.metrics.totalCost
-        },
-        stopsRoute: stops
-          .filter(s => s.assignedVehicleId === v.id)
-          .sort((a, b) => (a.stopSequence ?? 0) - (b.stopSequence ?? 0))
-          .map(s => s.name)
-      })),
-      totalMetrics: {
-        totalDistance: vehicles.reduce((sum, v) => sum + v.metrics.totalDistance, 0),
-        totalCost: vehicles.reduce((sum, v) => sum + v.metrics.totalCost, 0),
-        slaDelayedCount: stops.filter((s) => s.eta !== null && s.eta > s.timeWindowEnd).length,
-        slaOnTimeCount: stops.filter((s) => s.eta !== null && s.eta <= s.timeWindowEnd).length,
-        unassignedStops: stops.filter((s) => !s.assignedVehicleId).length
-      }
-    };
+  // ── Summary stats ─────────────────────────────────────────────────────────
+  const assignedCount = stops.filter(s => s.assignedVehicleId).length;
+  const unassignedCount = stops.length - assignedCount;
+  const activeCrews = vehicles.filter(v => stops.some(s => s.assignedVehicleId === v.id)).length;
 
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(exportData, null, 2));
-    const downloadAnchor = document.createElement('a');
-    downloadAnchor.setAttribute("href", dataStr);
-    downloadAnchor.setAttribute("download", `route_dispatch_export_${new Date().toISOString().split('T')[0]}.json`);
-    document.body.appendChild(downloadAnchor);
-    downloadAnchor.click();
-    downloadAnchor.remove();
-  };
-
+  // ── Auth guard ────────────────────────────────────────────────────────────
   if (auth.loading) {
     return (
-      <div className="min-h-screen w-full flex items-center justify-center bg-slate-50">
-        <div className="text-slate-400 text-sm">Loading…</div>
+      <div className="h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-slate-500 font-medium">Loading NeatFleet...</p>
+        </div>
       </div>
     );
   }
 
-  if (!auth.company) {
+  if (!auth.authUser || !auth.profile || !auth.company) {
     return <AuthScreen auth={auth} />;
   }
 
+  // ── Render ────────────────────────────────────────────────────────────────
   return (
-    <div className="flex flex-col h-screen bg-slate-50 text-slate-900 font-sans select-none overflow-hidden antialiased">
-      {/* 1. Global Navigation Header */}
-      <header className="flex items-center justify-between px-6 py-4 bg-white border-b border-slate-200 shadow-xs z-10">
-        <div className="flex items-center gap-3">
-          <div className="bg-blue-50 p-2.5 rounded-xl border border-blue-200">
-            <Compass className="w-6 h-6 text-blue-600" />
+    <div className="h-screen flex flex-col bg-slate-100 overflow-hidden font-sans">
+
+      {/* ── TOP HEADER BAR ─────────────────────────────────────────────────── */}
+      <header className="flex items-center justify-between px-5 py-3 bg-white border-b border-slate-200 shadow-sm z-20 gap-4">
+        {/* Brand */}
+        <div className="flex items-center gap-3 shrink-0">
+          <div className="bg-blue-600 p-2 rounded-lg">
+            <Route className="w-5 h-5 text-white" />
           </div>
           <div>
-            <h1 className="text-base font-black tracking-tight text-slate-900 flex items-center gap-1.5 uppercase">
-              RouteManager Studio <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full border border-blue-200">Enterprise</span>
-            </h1>
-            <p className="text-xs text-slate-500">Tactical Route Optimization & Dispatch Command Board</p>
+            <div className="text-sm font-black text-slate-900 tracking-tight">NeatFleet</div>
+            <div className="text-[10px] text-slate-400 font-medium">{auth.company.name}</div>
           </div>
         </div>
 
-        {/* Global Dispatch Progress */}
-        <div className="hidden md:flex items-center gap-6">
-          <div className="flex items-center gap-3 bg-white border border-slate-200 px-4 py-2 rounded-xl shadow-xs">
-            <Activity className="w-4 h-4 text-emerald-600" />
-            <div className="text-xs">
-              <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Scheduled Drops</span>
-              <span className="font-bold text-slate-900 font-mono">
-                {stops.filter((s) => s.assignedVehicleId).length} / {stops.length} Orders
-              </span>
-            </div>
-          </div>
+        {/* Date selector */}
+        <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-lg px-3 py-1.5">
+          <Calendar className="w-3.5 h-3.5 text-slate-500" />
+          <input
+            type="date"
+            value={serviceDate}
+            onChange={e => { setServiceDate(e.target.value); handleReset(); }}
+            className="text-xs font-semibold text-slate-700 bg-transparent border-none outline-none cursor-pointer"
+          />
+        </div>
 
-          <div className="flex items-center gap-3 bg-white border border-slate-200 px-4 py-2 rounded-xl shadow-xs">
-            <Truck className="w-4 h-4 text-blue-600" />
-            <div className="text-xs">
-              <span className="text-slate-500 block text-[9px] uppercase font-bold tracking-wider">Operational Fleet</span>
-              <span className="font-bold text-slate-900 font-mono">
-                {vehicles.filter((v) => v.metrics.loadUsed > 0).length} / {vehicles.length} Active
-              </span>
-            </div>
-          </div>
+        {/* KPI strip */}
+        <div className="hidden md:flex items-center gap-4">
+          <Kpi icon={<MapPin className="w-3.5 h-3.5 text-blue-500" />}
+            label="Stops" value={`${assignedCount} / ${stops.length}`} sub="assigned" />
+          <Kpi icon={<Truck className="w-3.5 h-3.5 text-emerald-500" />}
+            label="Crew" value={`${activeCrews} / ${vehicles.length}`} sub="active" />
+          <Kpi icon={<AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
+            label="Unassigned" value={String(unassignedCount)} sub="stops"
+            alert={unassignedCount > 0} />
+        </div>
 
-          <button
-            id="export-route-data-btn"
-            onClick={handleExportRouteData}
-            className="flex items-center gap-2 px-4.5 py-2.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 rounded-xl transition-all shadow-xs cursor-pointer border border-blue-700/50 hover:shadow-sm"
-          >
-            <Download className="w-4 h-4" />
-            <span>Export Route Data</span>
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 shrink-0">
+          {routeStatus === 'unbuilt' && (
+            <button onClick={handleBuildRoutes} disabled={stops.length === 0 || building}
+              className="flex items-center gap-2 px-4 py-2 text-xs font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded-lg transition shadow-sm cursor-pointer">
+              {building
+                ? <><span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" /> Building...</>
+                : <><Play className="w-3.5 h-3.5" /> Build Routes</>}
+            </button>
+          )}
+          {routeStatus === 'built' && (
+            <>
+              <button onClick={handleReset}
+                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer">
+                <RotateCcw className="w-3.5 h-3.5" /> Rebuild
+              </button>
+              <button onClick={handleDispatch}
+                className="flex items-center gap-2 px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition shadow-sm cursor-pointer">
+                <Send className="w-3.5 h-3.5" /> Dispatch All
+              </button>
+            </>
+          )}
+          {routeStatus === 'dispatched' && (
+            <>
+              <span className="flex items-center gap-1.5 px-3 py-2 text-xs font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg">
+                <CheckCircle2 className="w-3.5 h-3.5" /> Dispatched
+              </span>
+              <button onClick={handleReset}
+                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer">
+                <RotateCcw className="w-3.5 h-3.5" /> Reset
+              </button>
+            </>
+          )}
+
+          <button onClick={handleExportCSV} disabled={stops.length === 0}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 disabled:opacity-40 rounded-lg transition cursor-pointer">
+            <Download className="w-3.5 h-3.5" /> CSV
           </button>
 
-          <div className="flex items-center gap-3 pl-3 border-l border-slate-200">
-            <div className="text-right">
-              <div className="text-xs font-bold text-slate-900">{auth.company?.name}</div>
-              <div className="text-[10px] text-slate-500">{auth.profile?.fullName} · {auth.profile?.role}</div>
+          <div className="flex items-center gap-2 pl-3 border-l border-slate-200">
+            <div className="text-right hidden md:block">
+              <div className="text-[11px] font-bold text-slate-800">{auth.profile.fullName}</div>
+              <div className="text-[10px] text-slate-400 capitalize">{auth.profile.role}</div>
             </div>
-            <button
-              onClick={() => auth.logout()}
-              className="px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
-            >
-              Sign out
+            <button onClick={auth.logout}
+              className="p-2 text-slate-400 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition cursor-pointer"
+              title="Sign out">
+              <LogOut className="w-4 h-4" />
             </button>
           </div>
         </div>
       </header>
 
-      {/* 2. Simulation Controller & Global Clock HUD */}
-      <section className="flex flex-wrap items-center justify-between px-6 py-3 bg-white border-b border-slate-200 gap-4">
-        {/* Simulation Controls */}
-        <div className="flex items-center gap-2.5">
-          <button
-            onClick={() => setIsSimulating(!isSimulating)}
-            className={`flex items-center gap-2 px-4 py-2 text-xs font-bold rounded-xl transition cursor-pointer ${
-              isSimulating
-                ? 'bg-amber-500 hover:bg-amber-600 text-white shadow-xs'
-                : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xs'
-            }`}
-          >
-            {isSimulating ? <><Pause className="w-4 h-4" /> Pause Simulation</> : <><Play className="w-4 h-4" /> Start Simulation</>}
-          </button>
+      {/* ── MAIN WORKSPACE ──────────────────────────────────────────────────── */}
+      <div className="flex flex-1 overflow-hidden">
 
-          <button
-            onClick={() => {
-              setIsSimulating(false);
-              setSimulationTime(0);
-            }}
-            className="flex items-center justify-center p-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl transition cursor-pointer"
-            title="Reset simulation to 8:00 AM"
-          >
-            <RotateCcw className="w-4 h-4" />
-          </button>
-
-          <div className="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200">
-            {([1, 2, 5, 10] as const).map((speed) => (
-              <button
-                key={speed}
-                onClick={() => setSimSpeed(speed)}
-                className={`px-3 py-1 text-[10px] font-bold rounded-lg transition cursor-pointer ${
-                  simSpeed === speed ? 'bg-white text-blue-600 font-extrabold shadow-xs' : 'text-slate-500 hover:text-slate-800'
-                }`}
-              >
-                {speed}x
+        {/* ── LEFT PANEL ────────────────────────────────────────────────────── */}
+        <aside className="w-[340px] shrink-0 flex flex-col bg-white border-r border-slate-200 z-10">
+          {/* Tab nav */}
+          <div className="flex border-b border-slate-200">
+            {([
+              ['orders', MapPin, 'Orders'],
+              ['routes', Layers, 'Routes'],
+              ['fleet',  Truck,  'Crew'],
+              ['settings', Settings, 'Solver'],
+            ] as const).map(([id, Icon, label]) => (
+              <button key={id} onClick={() => setTab(id)}
+                className={`flex-1 flex flex-col items-center py-2.5 text-[10px] font-bold transition border-b-2 cursor-pointer ${tab === id ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-400 hover:text-slate-700'}`}>
+                <Icon className="w-4 h-4 mb-0.5" />
+                {label}
               </button>
             ))}
           </div>
-        </div>
 
-        {/* Global Simulated Progress Slider */}
-        <div className="flex-1 max-w-xl flex items-center gap-4">
-          <span className="text-[10px] text-slate-500 font-mono">08:00 AM</span>
-          <input
-            type="range"
-            min="0"
-            max="480"
-            value={simulationTime}
-            onChange={(e) => {
-              setIsSimulating(false);
-              setSimulationTime(parseInt(e.target.value));
-            }}
-            className="flex-1 h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-          />
-          <span className="text-[10px] text-slate-500 font-mono">04:00 PM</span>
-        </div>
-
-        {/* Active Simulation Status Badge */}
-        <div className="flex items-center gap-2 bg-slate-100 px-3.5 py-2 rounded-xl border border-slate-200 text-xs text-slate-700 shadow-xs">
-          <span className="text-slate-500 font-mono">Simulation Time:</span>
-          <span className="text-blue-600 font-bold font-mono">
-            {String(Math.floor(simulationTime / 60) + 8).padStart(2, '0')}:
-            {String(simulationTime % 60).padStart(2, '0')}{' '}
-            {Math.floor(simulationTime / 60) + 8 < 12 ? 'AM' : 'PM'}
-          </span>
-          <span className="text-slate-300">|</span>
-          <span className={`w-2 h-2 rounded-full ${isSimulating ? 'bg-emerald-500 animate-ping' : 'bg-slate-400'}`}></span>
-        </div>
-      </section>
-
-      {/* 3. Three-Column Workspace Dashboard */}
-      <main className="flex-1 flex overflow-hidden p-4 gap-4 bg-slate-50">
-        {/* Left Column (Order Book & Fleet Tab Control) */}
-        <section className="w-1/4 min-w-[320px] max-w-[400px] flex flex-col gap-3 h-full">
-          {/* Custom Tabs */}
-          <div className="flex gap-1 bg-slate-200/60 p-1 rounded-xl border border-slate-200/60 shadow-xs">
-            <button
-              onClick={() => setLeftTab('orders')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
-                leftTab === 'orders'
-                  ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <ShoppingBag className="w-3.5 h-3.5" /> Order Book
-            </button>
-            <button
-              onClick={() => setLeftTab('fleet')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
-                leftTab === 'fleet'
-                  ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Truck className="w-3.5 h-3.5" /> Fleet Control
-            </button>
-          </div>
-
+          {/* Tab content */}
           <div className="flex-1 overflow-hidden">
-            {leftTab === 'orders' ? (
+            {tab === 'orders' && (
               <OrderBook
                 stops={stops}
                 onAddStop={handleAddStop}
                 onDeleteStop={handleDeleteStop}
-                onLoadPreset={handleLoadPreset}
+                onLoadPreset={() => {}}
                 selectedStopId={selectedStopId}
                 onSelectStop={setSelectedStopId}
                 onClearAllStops={handleClearAllStops}
                 dispatchLat={auth.company?.dispatchLat ?? depot.lat}
                 dispatchLng={auth.company?.dispatchLng ?? depot.lng}
               />
-            ) : (
+            )}
+
+            {tab === 'routes' && (
+              <RoutesPanel
+                stops={stops}
+                vehicles={vehicles}
+                routeStatus={routeStatus}
+                expandedCrews={expandedCrews}
+                onToggleCrew={(id) => setExpandedCrews(prev => {
+                  const next = new Set(prev);
+                  next.has(id) ? next.delete(id) : next.add(id);
+                  return next;
+                })}
+                selectedStopId={selectedStopId}
+                onSelectStop={setSelectedStopId}
+                onSelectVehicle={setSelectedVehicleId}
+                onDeleteStop={handleDeleteStop}
+                onDragStart={handleDragStart}
+                onDropOnVehicle={handleDropOnVehicle}
+                onBuildRoutes={handleBuildRoutes}
+                building={building}
+              />
+            )}
+
+            {tab === 'fleet' && (
               <FleetManager
                 vehicles={vehicles}
                 onAddVehicle={handleAddVehicle}
@@ -758,18 +396,40 @@ export default function App() {
                 onSelectVehicle={setSelectedVehicleId}
               />
             )}
-          </div>
-        </section>
 
-        {/* Center Column (Map visual rendering space) */}
-        <section className="flex-1 h-full min-w-[450px]">
+            {tab === 'settings' && (
+              <AnalyticsPanel
+                vehicles={vehicles}
+                stops={stops}
+                config={config}
+                onUpdateConfig={setConfig}
+                onOptimize={handleBuildRoutes}
+              />
+            )}
+          </div>
+        </aside>
+
+        {/* ── MAP (center) ───────────────────────────────────────────────────── */}
+        <main className="flex-1 relative overflow-hidden">
+          {/* Status bar over map */}
+          <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
+            <div className="flex items-center gap-2 pointer-events-auto">
+              <StatusBadge status={routeStatus} />
+              {routeStatus === 'unbuilt' && stops.length > 0 && (
+                <span className="text-[10px] bg-white/90 border border-slate-200 text-slate-500 px-2 py-1 rounded-lg shadow-sm">
+                  {stops.length} stop{stops.length !== 1 ? 's' : ''} ready to route
+                </span>
+              )}
+            </div>
+          </div>
+
           <InteractiveMap
             stops={stops}
             vehicles={vehicles}
             depot={depot}
             trafficZones={trafficZones}
-            simulationTime={simulationTime}
-            isSimulationRunning={isSimulating}
+            simulationTime={0}
+            isSimulationRunning={false}
             onAddStop={handleMapClickAdd}
             onUpdateStopCoordinates={handleUpdateStopCoords}
             selectedStopId={selectedStopId}
@@ -777,49 +437,194 @@ export default function App() {
             selectedVehicleId={selectedVehicleId}
             onSelectVehicle={setSelectedVehicleId}
           />
-        </section>
+        </main>
+      </div>
+    </div>
+  );
+}
 
-        {/* Right Column (Analytics & AI Copilot tabs) */}
-        <section className="w-1/4 min-w-[320px] max-w-[400px] flex flex-col gap-3 h-full">
-          {/* Custom Tabs */}
-          <div className="flex gap-1 bg-slate-200/60 p-1 rounded-xl border border-slate-200/60 shadow-xs">
-            <button
-              onClick={() => setRightTab('analytics')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
-                rightTab === 'analytics'
-                  ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <BarChart className="w-3.5 h-3.5" /> Optimizer Controls
-            </button>
-            <button
-              onClick={() => setRightTab('copilot')}
-              className={`flex-1 flex items-center justify-center gap-2 py-2 text-xs font-bold rounded-lg transition cursor-pointer ${
-                rightTab === 'copilot'
-                  ? 'bg-white text-blue-600 shadow-xs'
-                  : 'text-slate-500 hover:text-slate-800'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" /> AI Copilot
-            </button>
-          </div>
+// ── Sub-components ────────────────────────────────────────────────────────
 
-          <div className="flex-1 overflow-hidden">
-            {rightTab === 'analytics' ? (
-              <AnalyticsPanel
-                vehicles={vehicles}
-                stops={stops}
-                config={config}
-                onUpdateConfig={setConfig}
-                onOptimize={triggerOptimization}
+function Kpi({ icon, label, value, sub, alert }: { icon: React.ReactNode; label: string; value: string; sub: string; alert?: boolean }) {
+  return (
+    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${alert ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+      {icon}
+      <div>
+        <div className={`text-xs font-bold ${alert ? 'text-amber-700' : 'text-slate-800'}`}>{value}</div>
+        <div className="text-[9px] text-slate-400 uppercase font-bold tracking-wide">{sub}</div>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: RouteStatus }) {
+  if (status === 'unbuilt') return (
+    <span className="flex items-center gap-1.5 text-[11px] font-bold bg-white/95 border border-slate-200 text-slate-500 px-3 py-1.5 rounded-lg shadow-sm">
+      <span className="w-2 h-2 rounded-full bg-slate-300" /> Planning Mode
+    </span>
+  );
+  if (status === 'built') return (
+    <span className="flex items-center gap-1.5 text-[11px] font-bold bg-white/95 border border-blue-200 text-blue-700 px-3 py-1.5 rounded-lg shadow-sm">
+      <span className="w-2 h-2 rounded-full bg-blue-500" /> Routes Built — Ready to Dispatch
+    </span>
+  );
+  return (
+    <span className="flex items-center gap-1.5 text-[11px] font-bold bg-white/95 border border-emerald-200 text-emerald-700 px-3 py-1.5 rounded-lg shadow-sm">
+      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" /> Routes Dispatched
+    </span>
+  );
+}
+
+// ── Routes Panel ──────────────────────────────────────────────────────────
+interface RoutesPanelProps {
+  stops: Stop[];
+  vehicles: Vehicle[];
+  routeStatus: RouteStatus;
+  expandedCrews: Set<string>;
+  onToggleCrew: (id: string) => void;
+  selectedStopId: string | null;
+  onSelectStop: (id: string | null) => void;
+  onSelectVehicle: (id: string | null) => void;
+  onDeleteStop: (id: string) => void;
+  onDragStart: (stopId: string, vehicleId: string | null) => void;
+  onDropOnVehicle: (vehicleId: string) => void;
+  onBuildRoutes: () => void;
+  building: boolean;
+}
+
+function RoutesPanel({
+  stops, vehicles, routeStatus, expandedCrews, onToggleCrew,
+  selectedStopId, onSelectStop, onSelectVehicle,
+  onDeleteStop, onDragStart, onDropOnVehicle, onBuildRoutes, building
+}: RoutesPanelProps) {
+
+  const unassigned = stops.filter(s => !s.assignedVehicleId);
+  const [dragOver, setDragOver] = useState<string | null>(null);
+
+  return (
+    <div className="flex flex-col h-full overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
+        <h2 className="text-sm font-bold text-slate-800">Route Plan</h2>
+        {routeStatus === 'unbuilt' ? (
+          <button onClick={onBuildRoutes} disabled={stops.length === 0 || building}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg transition cursor-pointer">
+            {building ? 'Building...' : <><Play className="w-3 h-3" /> Build</>}
+          </button>
+        ) : (
+          <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${routeStatus === 'dispatched' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
+            {routeStatus === 'dispatched' ? '✓ Dispatched' : 'Built'}
+          </span>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {/* Unassigned stops */}
+        {unassigned.length > 0 && (
+          <div className="border-b border-slate-100 bg-amber-50/50">
+            <div className="flex items-center gap-2 px-4 py-2">
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+              <span className="text-[11px] font-bold text-amber-700">Unassigned ({unassigned.length})</span>
+            </div>
+            {unassigned.map(stop => (
+              <StopRow key={stop.id} stop={stop} vehicle={null}
+                selected={selectedStopId === stop.id}
+                onSelect={() => onSelectStop(stop.id)}
+                onDelete={() => onDeleteStop(stop.id)}
+                onDragStart={() => onDragStart(stop.id, null)}
               />
-            ) : (
-              <AICopilot stops={stops} vehicles={vehicles} config={config} />
-            )}
+            ))}
           </div>
-        </section>
-      </main>
+        )}
+
+        {/* Per-crew route sections */}
+        {vehicles.map(v => {
+          const crewStops = stops
+            .filter(s => s.assignedVehicleId === v.id)
+            .sort((a, b) => (a.stopSequence ?? 0) - (b.stopSequence ?? 0));
+          const expanded = expandedCrews.has(v.id);
+          const totalMins = v.metrics.totalTime;
+          const isDragTarget = dragOver === v.id;
+
+          return (
+            <div key={v.id}
+              className={`border-b border-slate-100 transition ${isDragTarget ? 'bg-blue-50' : ''}`}
+              onDragOver={(e) => { e.preventDefault(); setDragOver(v.id); }}
+              onDragLeave={() => setDragOver(null)}
+              onDrop={() => { setDragOver(null); onDropOnVehicle(v.id); }}>
+
+              {/* Crew header */}
+              <button
+                onClick={() => { onToggleCrew(v.id); onSelectVehicle(v.id); }}
+                className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 transition cursor-pointer text-left">
+                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: v.color }} />
+                <span className="flex-1 text-xs font-bold text-slate-800 truncate">{v.name}</span>
+                <div className="flex items-center gap-2 text-[10px] text-slate-400">
+                  <span className="font-mono">{crewStops.length} stops</span>
+                  {totalMins > 0 && <span className="font-mono">{Math.round(totalMins / 60 * 10) / 10}h</span>}
+                </div>
+                {expanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+              </button>
+
+              {/* Stop list */}
+              {expanded && (
+                <div className="pb-1">
+                  {crewStops.length === 0 ? (
+                    <p className="text-[10px] text-slate-400 px-10 py-2 italic">
+                      {routeStatus === 'unbuilt' ? 'Drag stops here or build routes' : 'No stops assigned'}
+                    </p>
+                  ) : crewStops.map((stop, idx) => (
+                    <StopRow key={stop.id} stop={stop} vehicle={v} index={idx}
+                      selected={selectedStopId === stop.id}
+                      onSelect={() => onSelectStop(stop.id)}
+                      onDelete={() => onDeleteStop(stop.id)}
+                      onDragStart={() => onDragStart(stop.id, v.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Stop Row (used in routes panel) ──────────────────────────────────────
+function StopRow({ stop, vehicle, index, selected, onSelect, onDelete, onDragStart }: {
+  stop: Stop; vehicle: Vehicle | null; index?: number;
+  selected: boolean; onSelect: () => void; onDelete: () => void; onDragStart: () => void;
+}) {
+  const isDelayed = stop.arrivalTime !== null && stop.arrivalTime > stop.timeWindowEnd;
+  return (
+    <div
+      draggable
+      onDragStart={(e) => { e.stopPropagation(); onDragStart(); }}
+      onClick={onSelect}
+      className={`flex items-center gap-2 px-4 py-2 cursor-pointer transition text-xs ${selected ? 'bg-blue-50' : 'hover:bg-slate-50'}`}>
+      <GripVertical className="w-3.5 h-3.5 text-slate-300 shrink-0 cursor-grab" />
+      {index !== undefined && (
+        <span className="w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0 text-white"
+          style={{ backgroundColor: vehicle?.color ?? '#94a3b8' }}>
+          {index + 1}
+        </span>
+      )}
+      <div className="flex-1 min-w-0">
+        <div className="font-semibold text-slate-800 truncate">{stop.name}</div>
+        <div className="text-[10px] text-slate-400 truncate">{stop.address}</div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {stop.eta !== null && (
+          <span className={`text-[10px] font-mono font-bold ${isDelayed ? 'text-red-500' : 'text-slate-500'}`}>
+            {fmtTime(stop.eta)}
+          </span>
+        )}
+        <button onClick={(e) => { e.stopPropagation(); onDelete(); }}
+          className="p-1 text-slate-300 hover:text-red-500 transition cursor-pointer">
+          <Trash2 className="w-3 h-3" />
+        </button>
+      </div>
     </div>
   );
 }
