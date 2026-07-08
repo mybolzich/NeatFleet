@@ -90,8 +90,16 @@ export function useAuth() {
 
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
-    await account.createEmailPasswordSession(email, password);
-    await refreshSession();
+    try {
+      await account.createEmailPasswordSession(email, password);
+      await refreshSession();
+    } catch (err: any) {
+      console.error('[AUTH] login error:', err);
+      if (err?.message?.includes('CORS') || err?.message?.includes('Access-Control')) {
+        throw new Error('⚠️ CORS Error: The Appwrite domain needs to be configured. Please contact support or check the console logs.');
+      }
+      throw err;
+    }
   }, [refreshSession]);
 
   const registerCompany = useCallback(async (
@@ -146,6 +154,11 @@ export function useAuth() {
       console.log('[AUTH] refreshSession complete');
     } catch (err: any) {
       console.error('[AUTH] registerCompany error:', err);
+      
+      // Provide helpful message for CORS errors
+      if (err?.message?.includes('CORS') || err?.message?.includes('Access-Control')) {
+        throw new Error('⚠️ CORS Error: The Appwrite domain needs to be configured. Please contact support or check the console logs.');
+      }
       throw err;
     }
   }, [refreshSession]);
