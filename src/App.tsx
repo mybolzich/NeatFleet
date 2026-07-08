@@ -27,7 +27,7 @@ import { useAuthFirebase } from './lib/useAuthFirebase';
 import { useCloudSync } from './lib/useCloudSync';
 
 // Initial baseline Depot and Traffic zones
-const CENTRAL_DEPOT: Depot = { x: 50, y: 50, address: 'Central Metro Depot, Main Ave' };
+const CENTRAL_DEPOT: Depot = { x: 50, y: 50, lat: 28.1518, lng: -82.3743, address: 'Tampa, FL (Cornerstone Dispatch)' };
 
 const INITIAL_TRAFFIC: TrafficZone[] = [
   { id: 't1', name: 'Downtown Congestion', x: 50, y: 50, radius: 18, delayFactor: 2.2 },
@@ -745,6 +745,8 @@ export default function App() {
                 selectedStopId={selectedStopId}
                 onSelectStop={setSelectedStopId}
                 onClearAllStops={handleClearAllStops}
+                dispatchLat={auth.company?.dispatchLat ?? depot.lat}
+                dispatchLng={auth.company?.dispatchLng ?? depot.lng}
               />
             ) : (
               <FleetManager

@@ -78,11 +78,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     Record<string, { x: number; y: number; statusText: string; currentStopName: string }>
   >({});
 
-  const [viewMode, setViewMode] = useState<'grid' | 'google_map'>('grid');
+  const [viewMode, setViewMode] = useState<'grid' | 'google_map'>('google_map');
   const [mapType, setMapType] = useState<'roadmap' | 'terrain' | 'satellite' | 'hybrid'>('terrain');
 
-  const GRID_BASE_LAT = 37.7749; // San Francisco Center
-  const GRID_BASE_LNG = -122.4194;
+  // Use Tampa Bay as the default center (Cornerstone Landscape HQ area)
+  const GRID_BASE_LAT = depot.lat ?? 28.1518;
+  const GRID_BASE_LNG = depot.lng ?? -82.3743;
   const LAT_SCALE = -0.002;
   const LNG_SCALE = 0.0025;
 
@@ -91,6 +92,12 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       lat: GRID_BASE_LAT + (y - 50) * LAT_SCALE,
       lng: GRID_BASE_LNG + (x - 50) * LNG_SCALE,
     };
+  };
+
+  // For stops: prefer real lat/lng from geocoding, fall back to grid conversion
+  const stopToLatLng = (stop: Stop) => {
+    if (stop.lat && stop.lng) return { lat: stop.lat, lng: stop.lng };
+    return gridToLatLng(stop.x, stop.y);
   };
 
   const latLngToGrid = (lat: number, lng: number) => {
@@ -764,7 +771,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
               {/* Stop Markers */}
               {stops.map((stop) => {
-                const latLng = gridToLatLng(stop.x, stop.y);
+                const latLng = stopToLatLng(stop);
                 const isSelected = selectedStopId === stop.id;
                 const assignedVehicle = stop.assignedVehicleId ? vehicles.find((v) => v.id === stop.assignedVehicleId) : null;
                 const pinColor = assignedVehicle ? assignedVehicle.color : '#94a3b8';
@@ -864,7 +871,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
                 const pathPoints = [
                   gridToLatLng(depot.x, depot.y),
-                  ...assignedStops.map((s) => gridToLatLng(s.x, s.y)),
+                  ...assignedStops.map((s) => stopToLatLng(s)),
                   gridToLatLng(depot.x, depot.y),
                 ];
 
