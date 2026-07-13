@@ -1,228 +1,141 @@
 import React from 'react';
-import { BarChart, Wallet, ShieldAlert, Navigation, Compass, Sparkles, Scale, Info, Zap } from 'lucide-react';
+import { Sliders, Play, TrendingUp, Clock, Truck, AlertTriangle } from 'lucide-react';
 import { Vehicle, Stop, OptimizerConfig } from '../types';
 
-interface AnalyticsPanelProps {
+interface Props {
   vehicles: Vehicle[];
   stops: Stop[];
   config: OptimizerConfig;
-  onUpdateConfig: (config: OptimizerConfig) => void;
+  onUpdateConfig: (c: OptimizerConfig) => void;
   onOptimize: () => void;
 }
 
-export const AnalyticsPanel: React.FC<AnalyticsPanelProps> = ({
-  vehicles,
-  stops,
-  config,
-  onUpdateConfig,
-  onOptimize,
-}) => {
-  // Global aggregate metrics
-  const totalCost = vehicles.reduce((sum, v) => sum + v.metrics.totalCost, 0);
-  const totalDistance = vehicles.reduce((sum, v) => sum + v.metrics.totalDistance, 0);
-  const totalTime = vehicles.reduce((sum, v) => sum + v.metrics.totalTime, 0);
-  const totalDelays = stops.filter((s) => s.arrivalTime !== null && s.arrivalTime > s.timeWindowEnd).length;
-  const activeTrucks = vehicles.filter((v) => v.metrics.loadUsed > 0).length;
-
-  // Capacity calculations
-  const totalCapacity = vehicles.reduce((sum, v) => sum + v.capacity, 0);
-  const totalCargoPlanned = stops.reduce((sum, s) => sum + s.volume, 0);
-  const loadUtilization = totalCapacity > 0 ? (totalCargoPlanned / totalCapacity) * 100 : 0;
-
-  // Mock a comparison "Unoptimized Cost" (greedy sequential paths usually run 40-60% less efficient)
-  const unoptimizedCost = parseFloat((totalCost * 1.58 + 45).toFixed(2));
-  const savingsPercent = unoptimizedCost > 0 ? Math.round(((unoptimizedCost - totalCost) / unoptimizedCost) * 100) : 0;
+export const AnalyticsPanel: React.FC<Props> = ({ vehicles, stops, config, onUpdateConfig, onOptimize }) => {
+  const totalStops    = stops.length;
+  const assigned      = stops.filter(s => s.assignedVehicleId).length;
+  const delayed       = stops.filter(s => s.arrivalTime !== null && s.arrivalTime > s.timeWindowEnd).length;
+  const totalDist     = vehicles.reduce((s, v) => s + v.metrics.totalDistance, 0);
+  const totalTime     = vehicles.reduce((s, v) => s + v.metrics.totalTime, 0);
+  const totalCost     = vehicles.reduce((s, v) => s + v.metrics.totalCost, 0);
+  const activeCrews   = vehicles.filter(v => v.metrics.loadUsed > 0).length;
 
   return (
-    <div className="flex flex-col h-full bg-white border border-slate-200 rounded-2xl p-4 overflow-hidden shadow-xs">
-      {/* Panel Header */}
-      <div className="flex items-center gap-2 mb-4 pb-3 border-b border-slate-100">
-        <BarChart className="w-5 h-5 text-blue-600" />
-        <h2 className="text-base font-bold text-slate-800">Fleet Analytics & Solver</h2>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div className="panel-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Sliders size={15} color="var(--green-dark)" />
+          <span className="panel-title">Solver & Analytics</span>
+        </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-4 pr-1">
-        {/* VRP Solver Control Board */}
-        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200/70 space-y-3 shadow-xs">
-          <div className="flex items-center justify-between">
-            <h3 className="text-xs font-bold text-blue-600 uppercase tracking-wider flex items-center gap-1.5">
-              <Compass className="w-3.5 h-3.5" /> Engine Parameters
-            </h3>
-            <span className="text-[10px] text-slate-400 font-mono">Solomon VRPTW v1.0</span>
-          </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: 12 }} className="no-scrollbar">
 
-          <div className="space-y-3 text-xs font-sans">
-            {/* Minimize Vehicles Toggle */}
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-slate-700 font-bold block">Consolidate Fleet</label>
-                <span className="text-[10px] text-slate-500">Maximize drop density on fewer trucks</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={config.minimizeVehicles}
-                onChange={(e) => onUpdateConfig({ ...config, minimizeVehicles: e.target.checked })}
-                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 focus:ring-offset-white bg-white border-slate-300"
-              />
-            </div>
-
-            {/* Traffic Awareness Toggle */}
-            <div className="flex items-center justify-between">
-              <div>
-                <label className="text-slate-700 font-bold block">Traffic Risk Mitigation</label>
-                <span className="text-[10px] text-slate-500">Avoid active traffic sectors automatically</span>
-              </div>
-              <input
-                type="checkbox"
-                checked={config.trafficAware}
-                onChange={(e) => onUpdateConfig({ ...config, trafficAware: e.target.checked })}
-                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 focus:ring-offset-white bg-white border-slate-300"
-              />
-            </div>
-
-            <div className="border-t border-slate-200/80 my-2"></div>
-
-            {/* Time Window Weight slider */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-slate-700 font-bold">Time Window Penalty</span>
-                <span className="text-blue-600 font-mono font-bold">{config.timeWindowWeight}x</span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="10"
-                value={config.timeWindowWeight}
-                onChange={(e) => onUpdateConfig({ ...config, timeWindowWeight: parseInt(e.target.value) })}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-              />
-              <span className="text-[9px] text-slate-500 block">Higher values enforce extremely rigid delivery windows</span>
-            </div>
-
-            {/* Capacity Weight slider */}
-            <div className="space-y-1.5">
-              <div className="flex justify-between">
-                <span className="text-slate-700 font-bold">Capacity Constraint Weight</span>
-                <span className="text-blue-600 font-mono font-bold">{config.capacityWeight}x</span>
-              </div>
-              <input
-                type="range"
-                min="1"
-                max="10"
-                value={config.capacityWeight}
-                onChange={(e) => onUpdateConfig({ ...config, capacityWeight: parseInt(e.target.value) })}
-                className="w-full h-1.5 bg-slate-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-              />
-              <span className="text-[9px] text-slate-500 block">Higher values strictly penalize overloaded vehicles</span>
-            </div>
-          </div>
-
-          <button
-            onClick={onOptimize}
-            className="w-full flex items-center justify-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg text-xs transition cursor-pointer shadow-xs mt-3"
-          >
-            <Zap className="w-3.5 h-3.5" /> Run Route Optimization
-          </button>
+        {/* KPI cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 16 }}>
+          <KpiCard icon={<TrendingUp size={14} color="var(--green-dark)" />} label="Total Distance" value={totalDist.toFixed(1)} unit="units" />
+          <KpiCard icon={<Clock size={14} color="var(--blue)" />} label="Total Time" value={Math.round(totalTime)} unit="min" />
+          <KpiCard icon={<Truck size={14} color="var(--amber)" />} label="Active Crews" value={`${activeCrews}/${vehicles.length}`} unit="" />
+          <KpiCard icon={<AlertTriangle size={14} color="var(--red)" />} label="Delayed Stops" value={delayed} unit="" alert={delayed > 0} />
         </div>
 
-        {/* Global Statistics Indicators */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-            <div className="flex justify-between items-start mb-1">
-              <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Total Route Cost</span>
-              <Wallet className="w-4 h-4 text-emerald-600" />
-            </div>
-            <p className="text-lg font-bold text-slate-800 font-mono">${totalCost.toFixed(2)}</p>
-            <p className="text-[9px] text-emerald-600 font-sans mt-0.5">-{savingsPercent}% vs unoptimized</p>
-          </div>
-
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-            <div className="flex justify-between items-start mb-1">
-              <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Time Violations</span>
-              <ShieldAlert className="w-4 h-4 text-red-600" />
-            </div>
-            <p className="text-lg font-bold text-slate-800 font-mono">{totalDelays} stops</p>
-            <p className="text-[9px] text-slate-500 font-sans mt-0.5">out of {stops.length} drops</p>
-          </div>
-
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-            <div className="flex justify-between items-start mb-1">
-              <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Miles Driven</span>
-              <Navigation className="w-4 h-4 text-blue-600" />
-            </div>
-            <p className="text-lg font-bold text-slate-800 font-mono">{totalDistance.toFixed(1)} mi</p>
-            <p className="text-[9px] text-slate-500 font-sans mt-0.5">Average {activeTrucks > 0 ? (totalDistance / activeTrucks).toFixed(1) : 0} mi/truck</p>
-          </div>
-
-          <div className="bg-white p-3.5 rounded-xl border border-slate-200 shadow-xs">
-            <div className="flex justify-between items-start mb-1">
-              <span className="text-[10px] text-slate-450 uppercase font-bold tracking-wider">Active Fleet</span>
-              <Compass className="w-4 h-4 text-indigo-600" />
-            </div>
-            <p className="text-lg font-bold text-slate-800 font-mono">{activeTrucks} / {vehicles.length}</p>
-            <p className="text-[9px] text-slate-500 font-sans mt-0.5">trucks utilized</p>
+        {/* Summary bar */}
+        <div style={{ background: 'var(--bg)', borderRadius: 'var(--radius)', padding: '12px 14px', marginBottom: 16, border: '1px solid var(--border)' }}>
+          <div className="label-sm" style={{ marginBottom: 8 }}>Dispatch Summary</div>
+          <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <Stat label="Assigned" value={`${assigned}/${totalStops}`} />
+            <Stat label="Unassigned" value={totalStops - assigned} alert={(totalStops - assigned) > 0} />
+            <Stat label="Total Cost" value={`$${totalCost.toFixed(0)}`} />
           </div>
         </div>
 
-        {/* Cost Comparison Custom visual chart */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-3.5 shadow-xs">
-          <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
-            <Scale className="w-3.5 h-3.5 text-blue-600" /> Operational Cost Savings
-          </h3>
+        {/* Solver config */}
+        <div style={{ background: 'var(--bg)', borderRadius: 'var(--radius)', padding: '12px 14px', border: '1px solid var(--border)' }}>
+          <div className="label-sm" style={{ marginBottom: 12 }}>Optimizer Settings</div>
 
-          <div className="space-y-3">
-            {/* Unoptimized Bar */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[10px] font-mono">
-                <span className="text-slate-500">Greedy Manual Dispatch</span>
-                <span className="text-slate-700 font-bold">${unoptimizedCost.toFixed(2)}</span>
-              </div>
-              <div className="w-full h-3 bg-slate-100 rounded-lg overflow-hidden">
-                <div className="h-full bg-slate-400 rounded-lg" style={{ width: '100%' }} />
-              </div>
-            </div>
+          <Toggle label="Minimize Vehicles" checked={config.minimizeVehicles}
+            onChange={v => onUpdateConfig({ ...config, minimizeVehicles: v })} />
+          <Toggle label="Traffic Aware" checked={config.trafficAware}
+            onChange={v => onUpdateConfig({ ...config, trafficAware: v })} />
 
-            {/* Workwave Optimized Bar */}
-            <div className="space-y-1">
-              <div className="flex justify-between text-[10px] font-mono">
-                <span className="text-blue-600 font-bold flex items-center gap-1">
-                  <Sparkles className="w-3 h-3 text-amber-500 animate-pulse" /> Optimized Dispatch
-                </span>
-                <span className="text-blue-600 font-bold">${totalCost.toFixed(2)}</span>
-              </div>
-              <div className="w-full h-3 bg-slate-100 rounded-lg overflow-hidden">
-                <div
-                  className="h-full bg-gradient-to-r from-blue-600 to-emerald-500 rounded-lg transition-all duration-500"
-                  style={{ width: `${unoptimizedCost > 0 ? (totalCost / unoptimizedCost) * 100 : 0}%` }}
-                />
-              </div>
-            </div>
+          <div style={{ marginTop: 12 }}>
+            <SliderField label="Time Window Weight" value={config.timeWindowWeight} min={1} max={10}
+              onChange={v => onUpdateConfig({ ...config, timeWindowWeight: v })} />
+            <SliderField label="Capacity Weight" value={config.capacityWeight} min={1} max={10}
+              onChange={v => onUpdateConfig({ ...config, capacityWeight: v })} />
           </div>
-
-          {savingsPercent > 0 && (
-            <div className="bg-emerald-50 border border-emerald-200 text-emerald-700 p-2.5 rounded-lg text-[10px] font-semibold text-center shadow-xs">
-              🎉 Saving you ${parseFloat((unoptimizedCost - totalCost).toFixed(2))} ({savingsPercent}%) in fuel and labor costs!
-            </div>
-          )}
         </div>
 
-        {/* Cargo Loading Factor */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 space-y-2 shadow-xs">
-          <div className="flex justify-between text-xs text-slate-700 font-bold uppercase tracking-wider">
-            <span>Cargo Consolidation</span>
-            <span className="text-blue-600 font-mono">{totalCargoPlanned} / {totalCapacity} units</span>
+        {/* Per-crew breakdown */}
+        {activeCrews > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div className="label-sm" style={{ marginBottom: 8 }}>Crew Breakdown</div>
+            {vehicles.filter(v => v.metrics.loadUsed > 0).map(v => (
+              <div key={v.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ width: 10, height: 10, borderRadius: '50%', background: v.color, flexShrink: 0 }} />
+                <span style={{ flex: 1, fontSize: 11, fontWeight: 700, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>{Math.round(v.metrics.loadUsed)}/{v.capacity}</span>
+                <span style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600 }}>{Math.round(v.metrics.totalTime)}m</span>
+                <span style={{ fontSize: 10, color: 'var(--green-dark)', fontWeight: 700 }}>${v.metrics.totalCost.toFixed(0)}</span>
+              </div>
+            ))}
           </div>
-          <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-            <div
-              className="h-full bg-indigo-600 rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(100, loadUtilization)}%` }}
-            />
-          </div>
-          <p className="text-[10px] text-slate-500">
-            Total capacity planning represents <span className="font-bold text-slate-700">{Math.round(loadUtilization)}%</span> of overall fleet capabilities.
-          </p>
-        </div>
+        )}
+
+        <button onClick={onOptimize} disabled={stops.length === 0} className="btn btn-green"
+          style={{ width: '100%', marginTop: 16 }}>
+          <Play size={13} /> Run Optimizer
+        </button>
       </div>
     </div>
   );
 };
+
+function KpiCard({ icon, label, value, unit, alert }: { icon: React.ReactNode; label: string; value: string | number; unit: string; alert?: boolean }) {
+  return (
+    <div style={{ background: alert ? '#FEF3C7' : 'var(--surface)', border: `1px solid ${alert ? '#FDE68A' : 'var(--border)'}`, borderRadius: 'var(--radius-sm)', padding: '10px 12px', boxShadow: 'var(--shadow)' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>{icon}<span className="label-sm">{label}</span></div>
+      <div style={{ fontSize: 18, fontWeight: 800, color: alert ? 'var(--amber)' : 'var(--text-1)', letterSpacing: '-0.02em' }}>
+        {value}{unit && <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-3)', marginLeft: 3 }}>{unit}</span>}
+      </div>
+    </div>
+  );
+}
+
+function Stat({ label, value, alert }: { label: string; value: string | number; alert?: boolean }) {
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <div className="label-sm">{label}</div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: alert ? 'var(--amber)' : 'var(--text-1)', marginTop: 2 }}>{value}</div>
+    </div>
+  );
+}
+
+function Toggle({ label, checked, onChange }: { label: string; checked: boolean; onChange: (v: boolean) => void }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+      <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-1)' }}>{label}</span>
+      <button onClick={() => onChange(!checked)} style={{
+        width: 36, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer', transition: 'background .2s',
+        background: checked ? 'var(--green-dark)' : 'var(--border)', position: 'relative',
+      }}>
+        <span style={{
+          position: 'absolute', top: 3, left: checked ? 18 : 3, width: 14, height: 14,
+          borderRadius: '50%', background: '#fff', transition: 'left .2s', boxShadow: '0 1px 2px rgba(0,0,0,.2)',
+        }} />
+      </button>
+    </div>
+  );
+}
+
+function SliderField({ label, value, min, max, onChange }: { label: string; value: number; min: number; max: number; onChange: (v: number) => void }) {
+  return (
+    <div style={{ marginBottom: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span className="label-sm">{label}</span>
+        <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--green-dark)' }}>{value}</span>
+      </div>
+      <input type="range" min={min} max={max} value={value} onChange={e => onChange(+e.target.value)}
+        style={{ width: '100%', accentColor: 'var(--green-dark)' }} />
+    </div>
+  );
+}

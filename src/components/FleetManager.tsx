@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Truck, Plus, Trash2, Edit2, Settings, Sliders, Check } from 'lucide-react';
+import { Truck, Plus, Trash2, Edit2, Check, X } from 'lucide-react';
 import { Vehicle } from '../types';
 
 interface FleetManagerProps {
@@ -11,320 +11,136 @@ interface FleetManagerProps {
   onSelectVehicle: (id: string | null) => void;
 }
 
-const COLOR_PRESETS = [
-  '#38bdf8', // sky-400
-  '#fb7185', // rose-400
-  '#f43f5e', // rose-500
-  '#10b981', // emerald-500
-  '#fbbf24', // amber-400
-  '#a855f7', // purple-500
-  '#ec4899', // pink-500
-  '#6366f1', // indigo-500
-];
+const COLORS = ['#38bdf8','#fb7185','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#84cc16'];
 
-export const FleetManager: React.FC<FleetManagerProps> = ({
-  vehicles,
-  onAddVehicle,
-  onUpdateVehicle,
-  onDeleteVehicle,
-  selectedVehicleId,
-  onSelectVehicle,
-}) => {
+export const FleetManager: React.FC<FleetManagerProps> = ({ vehicles, onAddVehicle, onUpdateVehicle, onDeleteVehicle, selectedVehicleId, onSelectVehicle }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  // Form states for adding/editing
   const [name, setName] = useState('');
   const [capacity, setCapacity] = useState(100);
   const [costPerMile, setCostPerMile] = useState(1.5);
   const [costPerHour, setCostPerHour] = useState(18.0);
   const [speed, setSpeed] = useState(1.5);
-  const [color, setColor] = useState(COLOR_PRESETS[0]);
-  const [shiftStart, setShiftStart] = useState(0); // 8:00 AM
-  const [shiftEnd, setShiftEnd] = useState(480); // 4:00 PM
+  const [color, setColor] = useState(COLORS[0]);
+  const [shiftStart, setShiftStart] = useState(0);
+  const [shiftEnd, setShiftEnd] = useState(480);
 
-  const handleCreate = (e: React.FormEvent) => {
+  const resetForm = () => { setName(''); setCapacity(100); setCostPerMile(1.5); setCostPerHour(18); setSpeed(1.5); setColor(COLORS[vehicles.length % COLORS.length]); setShiftStart(0); setShiftEnd(480); };
+
+  const handleCreate = (e: any) => {
     e.preventDefault();
     if (!name.trim()) return;
-
-    onAddVehicle({
-      name,
-      capacity,
-      shiftStart,
-      shiftEnd,
-      costPerMile,
-      costPerHour,
-      color,
-      speed,
-    });
-
-    // Reset Form
-    setName('');
-    setCapacity(100);
-    setCostPerMile(1.5);
-    setCostPerHour(18.0);
-    setSpeed(1.5);
-    setColor(COLOR_PRESETS[vehicles.length % COLOR_PRESETS.length]);
-    setIsAdding(false);
+    onAddVehicle({ name, capacity, shiftStart, shiftEnd, costPerMile, costPerHour, color, speed });
+    resetForm(); setIsAdding(false);
   };
 
   const startEdit = (v: Vehicle) => {
-    setEditingId(v.id);
-    setName(v.name);
-    setCapacity(v.capacity);
-    setCostPerMile(v.costPerMile);
-    setCostPerHour(v.costPerHour);
-    setSpeed(v.speed);
-    setColor(v.color);
-    setShiftStart(v.shiftStart);
-    setShiftEnd(v.shiftEnd);
+    setEditingId(v.id); setName(v.name); setCapacity(v.capacity);
+    setCostPerMile(v.costPerMile); setCostPerHour(v.costPerHour);
+    setSpeed(v.speed); setColor(v.color); setShiftStart(v.shiftStart); setShiftEnd(v.shiftEnd);
   };
 
   const handleSaveEdit = (id: string) => {
-    onUpdateVehicle(id, {
-      name,
-      capacity,
-      costPerMile,
-      costPerHour,
-      speed,
-      color,
-      shiftStart,
-      shiftEnd,
-    });
+    onUpdateVehicle(id, { name, capacity, costPerMile, costPerHour, speed, color, shiftStart, shiftEnd });
     setEditingId(null);
   };
 
+  const fmtShift = (m: number) => { const h = (Math.floor(m / 60) + 8) % 24; return `${String(h % 12 || 12).padStart(2,'0')}:${String(m % 60).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`; };
+
   return (
-    <div className="flex flex-col h-full bg-white border border-slate-200 rounded-2xl p-4 overflow-hidden shadow-xs">
-      {/* Panel Header */}
-      <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <Truck className="w-5 h-5 text-blue-600" />
-          <h2 className="text-base font-bold text-slate-800">Fleet Control ({vehicles.length})</h2>
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+      <div className="panel-header">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <Truck size={15} color="var(--green-dark)" />
+          <span className="panel-title">Crew Fleet ({vehicles.length})</span>
         </div>
-        <button
-          onClick={() => setIsAdding(!isAdding)}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition cursor-pointer shadow-xs"
-        >
-          {isAdding ? 'Cancel' : <><Plus className="w-3.5 h-3.5" /> Add Vehicle</>}
+        <button onClick={() => { setIsAdding(!isAdding); setEditingId(null); resetForm(); }}
+          className="btn btn-green btn-sm">
+          {isAdding ? <><X size={11} /> Cancel</> : <><Plus size={11} /> Add</>}
         </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-3.5 pr-1">
-        {/* Add Vehicle Form */}
+      <div style={{ flex: 1, overflowY: 'auto' }} className="no-scrollbar">
+        {/* Add form */}
         {isAdding && (
-          <form onSubmit={handleCreate} className="bg-slate-50 p-4 rounded-xl border border-blue-100 space-y-3 shadow-xs">
-            <h3 className="text-xs font-bold text-blue-600 uppercase tracking-wider">New Delivery Truck</h3>
-            <div>
-              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Truck ID / Name</label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="e.g. RouteMaster Express"
-                className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/20"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Max Cargo Capacity</label>
-                <input
-                  type="number"
-                  value={capacity}
-                  onChange={(e) => setCapacity(parseInt(e.target.value) || 10)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-mono focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Driver Speed</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={speed}
-                  onChange={(e) => setSpeed(parseFloat(e.target.value) || 1.0)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-mono focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Cost / Mile ($)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  value={costPerMile}
-                  onChange={(e) => setCostPerMile(parseFloat(e.target.value) || 1.0)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-mono focus:border-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1">Driver Hour Rate ($)</label>
-                <input
-                  type="number"
-                  step="0.5"
-                  value={costPerHour}
-                  onChange={(e) => setCostPerHour(parseFloat(e.target.value) || 10.0)}
-                  className="w-full bg-white border border-slate-200 rounded-lg px-3 py-1.5 text-xs text-slate-800 font-mono focus:border-blue-500"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[10px] text-slate-500 uppercase font-bold mb-1.5">Route Line Color</label>
-              <div className="flex gap-2">
-                {COLOR_PRESETS.map((p) => (
-                  <button
-                    key={p}
-                    type="button"
-                    onClick={() => setColor(p)}
-                    className={`w-6 h-6 rounded-full border-2 transition cursor-pointer ${
-                      color === p ? 'border-slate-400 scale-110 shadow-xs' : 'border-transparent hover:scale-105'
-                    }`}
-                    style={{ backgroundColor: p }}
-                  />
-                ))}
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg text-xs font-bold transition mt-2 cursor-pointer shadow-xs"
-            >
-              Add to Fleet
+          <form onSubmit={handleCreate}
+            style={{ margin: 12, padding: 16, background: 'var(--bg)', borderRadius: 'var(--radius)', border: '1px solid var(--border)' }}>
+            <div className="label-sm" style={{ marginBottom: 12, color: 'var(--green-dark)' }}>New Vehicle</div>
+            <VehicleForm name={name} setName={setName} capacity={capacity} setCapacity={setCapacity}
+              costPerMile={costPerMile} setCostPerMile={setCostPerMile} costPerHour={costPerHour} setCostPerHour={setCostPerHour}
+              speed={speed} setSpeed={setSpeed} color={color} setColor={setColor}
+              shiftStart={shiftStart} setShiftStart={setShiftStart} shiftEnd={shiftEnd} setShiftEnd={setShiftEnd} />
+            <button type="submit" className="btn btn-green" style={{ width: '100%', marginTop: 12 }}>
+              <Plus size={13} /> Add Vehicle
             </button>
           </form>
         )}
 
-        {/* Vehicles List */}
-        {vehicles.map((vehicle) => {
-          const isSelected = selectedVehicleId === vehicle.id;
-          const isEditing = editingId === vehicle.id;
-
-          // Capacity usage ratio
-          const utilization = vehicle.capacity > 0 ? (vehicle.metrics.loadUsed / vehicle.capacity) * 100 : 0;
-          const progressColor = utilization > 90 ? 'bg-red-500' : utilization > 50 ? 'bg-amber-500' : 'bg-blue-600';
+        {/* Vehicle list */}
+        {vehicles.map(v => {
+          const isSelected = selectedVehicleId === v.id;
+          const isEditing = editingId === v.id;
+          const statusColors: Record<string, string> = { Idle: 'pill-neutral', Active: 'pill-green', Returning: 'pill-amber', 'Off Shift': 'pill-neutral' };
 
           return (
-            <div
-              key={vehicle.id}
-              onClick={() => {
-                if (!isEditing) {
-                  onSelectVehicle(isSelected ? null : vehicle.id);
-                }
-              }}
-              className={`group relative p-4 rounded-xl border transition cursor-pointer flex flex-col gap-3 ${
-                isSelected
-                  ? 'bg-blue-50/20 border-blue-400 shadow-xs'
-                  : 'bg-white hover:bg-slate-50/60 border-slate-200/80 hover:border-slate-300'
-              }`}
-            >
-              {/* Card Top / Identifiers */}
-              <div className="flex items-start justify-between">
-                <div className="flex items-center gap-2.5">
-                  <div
-                    className="w-3.5 h-3.5 rounded-full flex-shrink-0"
-                    style={{ backgroundColor: vehicle.color }}
-                  />
-                  {isEditing ? (
-                    <input
-                      type="text"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="bg-white border border-slate-300 rounded px-2 py-0.5 text-xs text-slate-800 max-w-[120px] focus:outline-none focus:border-blue-500"
-                    />
-                  ) : (
-                    <div>
-                      <h3 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-                        {vehicle.name}
-                      </h3>
-                      <p className="text-[10px] text-slate-500">Speed: {vehicle.speed}x • Shift: 08:00 AM - 04:00 PM</p>
+            <div key={v.id} onClick={() => onSelectVehicle(v.id)}
+              style={{ margin: '0 12px 8px', borderRadius: 'var(--radius)', border: `1px solid ${isSelected ? 'var(--green)' : 'var(--border)'}`, background: isSelected ? '#F0FDF4' : 'var(--surface)', boxShadow: 'var(--shadow)', transition: 'all .15s', cursor: 'pointer', overflow: 'hidden' }}>
+
+              {isEditing ? (
+                <div style={{ padding: 14 }}>
+                  <VehicleForm name={name} setName={setName} capacity={capacity} setCapacity={setCapacity}
+                    costPerMile={costPerMile} setCostPerMile={setCostPerMile} costPerHour={costPerHour} setCostPerHour={setCostPerHour}
+                    speed={speed} setSpeed={setSpeed} color={color} setColor={setColor}
+                    shiftStart={shiftStart} setShiftStart={setShiftStart} shiftEnd={shiftEnd} setShiftEnd={setShiftEnd} />
+                  <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+                    <button onClick={e => { e.stopPropagation(); handleSaveEdit(v.id); }} className="btn btn-green" style={{ flex: 1 }}>
+                      <Check size={13} /> Save
+                    </button>
+                    <button onClick={e => { e.stopPropagation(); setEditingId(null); }} className="btn btn-ghost" style={{ flex: 1 }}>
+                      <X size={13} /> Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ padding: '10px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    {/* Color swatch */}
+                    <div style={{ width: 36, height: 36, borderRadius: 10, background: v.color, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                      <Truck size={16} color="#fff" />
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text-1)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{v.name}</div>
+                      <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600, marginTop: 1 }}>
+                        {fmtShift(v.shiftStart)} – {fmtShift(v.shiftEnd)} · Cap {v.capacity}
+                      </div>
+                    </div>
+                    <span className={`pill ${statusColors[v.status] ?? 'pill-neutral'}`}>{v.status}</span>
+                  </div>
+
+                  {/* Metrics row */}
+                  {v.metrics.loadUsed > 0 && (
+                    <div style={{ display: 'flex', gap: 12, marginTop: 10, paddingTop: 10, borderTop: '1px solid var(--border)' }}>
+                      <Metric label="Load" value={`${v.metrics.loadUsed}/${v.capacity}`} />
+                      <Metric label="Dist" value={`${v.metrics.totalDistance.toFixed(1)}`} />
+                      <Metric label="Time" value={`${Math.round(v.metrics.totalTime)}m`} />
+                      <Metric label="Cost" value={`$${v.metrics.totalCost.toFixed(0)}`} />
                     </div>
                   )}
-                </div>
 
-                <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition duration-150" onClick={e => e.stopPropagation()}>
-                  {isEditing ? (
-                    <button
-                      onClick={() => handleSaveEdit(vehicle.id)}
-                      className="p-1 hover:bg-slate-100 text-emerald-600 rounded-lg transition cursor-pointer"
-                    >
-                      <Check className="w-3.5 h-3.5" />
+                  {/* Actions */}
+                  <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
+                    <button onClick={e => { e.stopPropagation(); startEdit(v); }}
+                      className="btn btn-ghost btn-sm" style={{ flex: 1 }}>
+                      <Edit2 size={11} /> Edit
                     </button>
-                  ) : (
-                    <button
-                      onClick={() => startEdit(vehicle)}
-                      className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-700 rounded-lg transition cursor-pointer"
-                    >
-                      <Edit2 className="w-3.5 h-3.5" />
+                    <button onClick={e => { e.stopPropagation(); onDeleteVehicle(v.id); }}
+                      className="btn btn-sm"
+                      style={{ background: 'var(--red-light)', color: 'var(--red)', border: 'none', flex: 1 }}>
+                      <Trash2 size={11} /> Remove
                     </button>
-                  )}
-                  <button
-                    onClick={() => onDeleteVehicle(vehicle.id)}
-                    disabled={vehicles.length <= 1}
-                    className="p-1 hover:bg-slate-100 text-slate-400 hover:text-red-500 rounded-lg transition disabled:opacity-30 disabled:hover:text-slate-450 cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* Editing Expanded Fields */}
-              {isEditing && (
-                <div className="grid grid-cols-2 gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-200" onClick={e => e.stopPropagation()}>
-                  <div>
-                    <span className="text-[9px] text-slate-500 font-bold block mb-1">CAPACITY</span>
-                    <input
-                      type="number"
-                      value={capacity}
-                      onChange={(e) => setCapacity(parseInt(e.target.value) || 1)}
-                      className="w-full bg-white border border-slate-200 px-1.5 py-0.5 text-[11px] font-mono rounded text-slate-800 focus:outline-none focus:border-blue-500"
-                    />
-                  </div>
-                  <div>
-                    <span className="text-[9px] text-slate-500 font-bold block mb-1">SPEED</span>
-                    <input
-                      type="number"
-                      step="0.1"
-                      value={speed}
-                      onChange={(e) => setSpeed(parseFloat(e.target.value) || 1.0)}
-                      className="w-full bg-white border border-slate-200 px-1.5 py-0.5 text-[11px] font-mono rounded text-slate-800 focus:outline-none focus:border-blue-500"
-                    />
                   </div>
                 </div>
               )}
-
-              {/* Capacity Progress Bar */}
-              <div className="space-y-1">
-                <div className="flex justify-between text-[10px] text-slate-500 font-mono">
-                  <span>Cargo Load Utilization</span>
-                  <span className="font-bold text-slate-700">{vehicle.metrics.loadUsed} / {vehicle.capacity} cargo units ({Math.round(utilization)}%)</span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${progressColor}`}
-                    style={{ width: `${Math.min(100, utilization)}%` }}
-                  />
-                </div>
-              </div>
-
-              {/* Statistics Overview */}
-              <div className="grid grid-cols-3 gap-2 bg-slate-50 border border-slate-100 p-2 rounded-lg text-[10px] text-slate-600 font-mono">
-                <div>
-                  <span className="text-[9px] text-slate-400 uppercase block font-bold mb-0.5">Dist</span>
-                  <span className="text-slate-800 font-bold">{vehicle.metrics.totalDistance} mi</span>
-                </div>
-                <div>
-                  <span className="text-[9px] text-slate-400 uppercase block font-bold mb-0.5">Time</span>
-                  <span className="text-slate-800 font-bold">{vehicle.metrics.totalTime} mins</span>
-                </div>
-                <div>
-                  <span className="text-[9px] text-slate-400 uppercase block font-bold mb-0.5">Cost</span>
-                  <span className="text-emerald-600 font-bold">${vehicle.metrics.totalCost}</span>
-                </div>
-              </div>
             </div>
           );
         })}
@@ -332,3 +148,48 @@ export const FleetManager: React.FC<FleetManagerProps> = ({
     </div>
   );
 };
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div style={{ flex: 1 }}>
+      <div className="label-sm">{label}</div>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-1)', marginTop: 1 }}>{value}</div>
+    </div>
+  );
+}
+
+function VehicleForm({ name, setName, capacity, setCapacity, costPerMile, setCostPerMile, costPerHour, setCostPerHour, speed, setSpeed, color, setColor, shiftStart, setShiftStart, shiftEnd, setShiftEnd }: any) {
+  const COLORS = ['#38bdf8','#fb7185','#10b981','#f59e0b','#8b5cf6','#ef4444','#06b6d4','#84cc16'];
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <FormField label="Name">
+        <input value={name} onChange={e => setName(e.target.value)} className="input" placeholder="Crew LM1 — Neri" />
+      </FormField>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+        <FormField label="Capacity"><input type="number" value={capacity} onChange={e => setCapacity(+e.target.value)} className="input" /></FormField>
+        <FormField label="Speed"><input type="number" step="0.1" value={speed} onChange={e => setSpeed(+e.target.value)} className="input" /></FormField>
+        <FormField label="$/mile"><input type="number" step="0.1" value={costPerMile} onChange={e => setCostPerMile(+e.target.value)} className="input" /></FormField>
+        <FormField label="$/hour"><input type="number" step="0.5" value={costPerHour} onChange={e => setCostPerHour(+e.target.value)} className="input" /></FormField>
+        <FormField label="Shift Start"><input type="number" value={shiftStart} onChange={e => setShiftStart(+e.target.value)} className="input" /></FormField>
+        <FormField label="Shift End"><input type="number" value={shiftEnd} onChange={e => setShiftEnd(+e.target.value)} className="input" /></FormField>
+      </div>
+      <FormField label="Color">
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          {COLORS.map(c => (
+            <button key={c} type="button" onClick={() => setColor(c)}
+              style={{ width: 26, height: 26, borderRadius: '50%', background: c, border: color === c ? '3px solid var(--text-1)' : '2px solid transparent', transition: 'border .1s' }} />
+          ))}
+        </div>
+      </FormField>
+    </div>
+  );
+}
+
+function FormField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="label-sm" style={{ marginBottom: 5 }}>{label}</div>
+      {children}
+    </div>
+  );
+}

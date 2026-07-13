@@ -63,7 +63,7 @@ function AddressAutocomplete({
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder || 'Search address...'}
-      className="w-full bg-white border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-blue-500"
+      className="input"
       autoComplete="off"
     />
   );
@@ -172,16 +172,14 @@ export const OrderBook: React.FC<OrderBookProps> = ({
   });
 
   return (
-    <div className="flex flex-col h-full bg-white border border-slate-200 rounded-2xl p-4 overflow-hidden shadow-xs">
+    <div style={{ display: "flex", flexDirection: "column", height: "100%", overflow: "hidden", background: "var(--surface)" }}>
       {/* Header */}
-      <div className="flex items-center justify-between mb-4 pb-3 border-b border-slate-100">
-        <div className="flex items-center gap-2">
-          <ShoppingBag className="w-5 h-5 text-blue-600" />
-          <h2 className="text-base font-bold text-slate-800">Order Book ({stops.length})</h2>
+      <div className="panel-header">
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}><ShoppingBag size={15} color="var(--green-dark)" /><span className="panel-title">Orders ({stops.length})</span>
         </div>
         <button
           onClick={() => { setIsAdding(!isAdding); setGeoError(''); }}
-          className="flex items-center gap-1 px-3 py-1.5 text-xs font-bold bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition cursor-pointer shadow-xs"
+          className="btn btn-green btn-sm"
         >
           {isAdding ? 'Cancel' : <><Plus className="w-3.5 h-3.5" /> Order</>}
         </button>
@@ -312,7 +310,7 @@ export const OrderBook: React.FC<OrderBookProps> = ({
             </div>
 
             <button onClick={handleSubmit} disabled={geocoding || !name.trim() || !customer.trim()}
-              className="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold py-2 rounded-lg text-xs transition cursor-pointer shadow-xs flex items-center justify-center gap-2">
+              className="btn btn-green" style={{ width: "100%", marginTop: 4 }}>
               {geocoding ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Geocoding...</> : 'Add Stop'}
             </button>
           </div>
@@ -333,7 +331,7 @@ export const OrderBook: React.FC<OrderBookProps> = ({
 
           return (
             <div key={stop.id} onClick={() => onSelectStop(isSelected ? null : stop.id)}
-              className={`p-3.5 rounded-xl border transition cursor-pointer flex flex-col gap-2.5 ${isSelected ? 'bg-blue-50/20 border-blue-400 shadow-xs' : 'bg-white hover:bg-slate-50/60 border-slate-200/80 hover:border-slate-300'}`}>
+              className="card fade-in" style={{ margin: "0 12px 8px", padding: "12px 14px", cursor: "pointer", borderColor: isSelected ? "var(--green)" : "var(--border)", background: isSelected ? "#F0FDF4" : "var(--surface)", transition: "all .15s" }}>
               <div className="flex items-start justify-between">
                 <div>
                   <h4 className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
@@ -348,7 +346,7 @@ export const OrderBook: React.FC<OrderBookProps> = ({
                   <p className="text-[10px] text-slate-500 mt-0.5">{stop.customer} • {stop.address}</p>
                 </div>
                 <div className="flex items-center gap-2">
-                  <span className={`px-1.5 py-0.5 rounded text-[9px] uppercase font-bold ${stop.priority === 'High' ? 'bg-red-50 text-red-600 border border-red-200' : stop.priority === 'Medium' ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-50 text-slate-600 border border-slate-200'}`}>
+                  <span className={`pill ${stop.priority === "High" ? "pill-red" : stop.priority === "Medium" ? "pill-amber" : "pill-neutral"}`}>
                     {stop.priority}
                   </span>
                   <button onClick={(e) => { e.stopPropagation(); onDeleteStop(stop.id); }}
@@ -393,7 +391,7 @@ export const OrderBook: React.FC<OrderBookProps> = ({
 
       {stops.length > 0 && (
         <button onClick={onClearAllStops}
-          className="mt-3 w-full py-2 bg-red-50 hover:bg-red-100/50 text-red-600 border border-red-200 text-xs font-bold rounded-lg transition cursor-pointer">
+          className="btn" style={{ width: "100%", marginTop: 12, background: "var(--red-light)", color: "var(--red)", border: "1px solid #FECACA" }}>
           Clear All Stops
         </button>
       )}
