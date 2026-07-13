@@ -12,7 +12,7 @@ import { OrderBook } from './components/OrderBook';
 import { FleetManager } from './components/FleetManager';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { AuthScreen } from './components/AuthScreen';
-import { useAuthFirebase } from './lib/useAuthFirebase';
+import { useAuth } from './lib/useAuth';
 import { useCloudSync } from './lib/useCloudSync';
 
 // ── Constants ─────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ const fmtTime = (mins: number) => {
 
 // ── Main App ──────────────────────────────────────────────────────────────
 export default function App() {
-  const auth = useAuthFirebase();
+  const auth = useAuth();
 
   const [stops, setStops]         = useState<Stop[]>([]);
   const [vehicles, setVehicles]   = useState<Vehicle[]>(INITIAL_VEHICLES);
@@ -60,7 +60,7 @@ export default function App() {
   const [serviceDate, setServiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [building, setBuilding]   = useState(false);
 
-  const companyId = auth.company?.$id ?? null;
+  const companyId = auth.company?.id ?? null;
   useCloudSync(companyId, stops, setStops, vehicles, setVehicles, depot, () => {}, trafficZones, () => {});
 
   // ── CRUD ─────────────────────────────────────────────────────────────────
@@ -230,7 +230,7 @@ export default function App() {
           <div style={{ width: 1, height: 24, background: 'var(--border)', margin: '0 4px' }} />
 
           <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)' }}>{auth.profile.fullName}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: 'var(--text-1)' }}>{auth.profile.full_name}</div>
             <div style={{ fontSize: 10, color: 'var(--text-3)', fontWeight: 600, textTransform: 'capitalize' }}>{auth.profile.role}</div>
           </div>
           <button onClick={auth.logout} title="Sign out"
@@ -275,8 +275,8 @@ export default function App() {
               <OrderBook stops={stops} onAddStop={handleAddStop} onDeleteStop={handleDeleteStop}
                 onLoadPreset={() => {}} selectedStopId={selectedStopId} onSelectStop={setSelectedStopId}
                 onClearAllStops={handleClearAllStops}
-                dispatchLat={auth.company?.dispatchLat ?? depot.lat}
-                dispatchLng={auth.company?.dispatchLng ?? depot.lng} />
+                dispatchLat={auth.company?.dispatch_lat ?? depot.lat}
+                dispatchLng={auth.company?.dispatch_lng ?? depot.lng} />
             )}
             {tab === 'routes' && (
               <RoutesPanel stops={stops} vehicles={vehicles} routeStatus={routeStatus}

@@ -1,174 +1,163 @@
 import { useState, useEffect, useCallback } from 'react';
-import { account, databases, DB_ID, COLLECTIONS, ID, Query } from './appwrite';
+import { supabase } from './supabase';
 
 export interface UserProfile {
-  $id: string;
-  companyId: string;
+  id: string;
+  company_id: string;
   email: string;
-  fullName: string;
+  full_name: string;
   role: 'owner' | 'dispatcher' | 'driver';
-  phone: string;
   active: boolean;
 }
 
 export interface CompanyProfile {
-  $id: string;
+  id: string;
   name: string;
   slug: string;
-  dispatchLat: number;
-  dispatchLng: number;
-  dispatchAddress: string;
+  dispatch_lat: number;
+  dispatch_lng: number;
+  dispatch_address: string;
 }
 
 export function useAuth() {
-  const [authUser, setAuthUser] = useState<any>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
-  const [company, setCompany] = useState<CompanyProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [authUser,  setAuthUser]  = useState<any>(null);
+  const [profile,   setProfile]   = useState<UserProfile | null>(null);
+  const [company,   setCompany]   = useState<CompanyProfile | null>(null);
+  const [loading,   setLoading]   = useState(true);
+  const [error,     setError]     = useState<string | null>(null);
 
+  // ── Load profile + company for a given user ID ──────────────────────────
   const loadProfile = useCallback(async (userId: string) => {
     try {
-      console.log('[AUTH] loadProfile: starting for userId=', userId);
-      const res = await databases.listDocuments(DB_ID, COLLECTIONS.users, [
-        Query.equal('$id', userId),
-      ]);
-      console.log('[AUTH] listDocuments result:', res);
-      
-      // Appwrite documents use companyId field but the user doc ID = auth user ID (set at creation)
-      const userDoc = await databases.getDocument(DB_ID, COLLECTIONS.users, userId).catch((err) => {
-        console.error('[AUTH] getDocument failed for user:', err);
-        return null;
-      });
-      console.log('[AUTH] userDoc fetched:', userDoc);
-      
-      if (!userDoc) {
-        console.log('[AUTH] userDoc is null, clearing profile/company');
-        setProfile(null);
-        setCompany(null);
-        setLoading(false);
-        return;
-      }
-      setProfile(userDoc as unknown as UserProfile);
+      const { data: prof, error: profErr } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single();
 
-      console.log('[AUTH] fetching company with companyId=', (userDoc as any).companyId);
-      const companyDoc = await databases.getDocument(DB_ID, COLLECTIONS.companies, (userDoc as any).companyId);
-      console.log('[AUTH] companyDoc fetched:', companyDoc);
-      setCompany(companyDoc as unknown as CompanyProfile);
+      if (profErr || !prof) {
+        setProfile(null); setCompany(null); return;
+      }
+      setProfile(prof as UserProfile);
+
+      const { data: comp, error: compErr } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', prof.company_id)
+        .single();
+
+      if (compErr || !comp) { setCompany(null); return; }
+      setCompany(comp as CompanyProfile);
     } catch (e) {
-      console.error('[AUTH] loadProfile error:', e);
-      setProfile(null);
-      setCompany(null);
-    } finally {
-      console.log('[AUTH] loadProfile complete, setting loading=false');
-      setLoading(false);
+      console.error('[useAuth] loadProfile error:', e);
+      setProfile(null); setCompany(null);
     }
   }, []);
 
-  const refreshSession = useCallback(async () => {
-    console.log('[AUTH] refreshSession: starting');
-    setLoading(true);
-    try {
-      const user = await account.get();
-      console.log('[AUTH] got auth user:', user.$id);
-      setAuthUser(user);
-      console.log('[AUTH] calling loadProfile...');
-      await loadProfile(user.$id);
-      console.log('[AUTH] refreshSession complete');
-    } catch (err: any) {
-      console.error('[AUTH] refreshSession error:', err);
-      setAuthUser(null);
-      setProfile(null);
-      setCompany(null);
+  // ── Listen to Supabase Auth state changes ───────────────────────────────
+  useEffect(() => {
+    // Get initial session
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        setAuthUser(session.user);
+        await loadProfile(session.user.id);
+      }
       setLoading(false);
-    }
+    });
+
+    // Subscribe to future auth events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      async (event, session) => {
+        if (session?.user) {
+          setAuthUser(session.user);
+          await loadProfile(session.user.id);
+        } else {
+          setAuthUser(null);
+          setProfile(null);
+          setCompany(null);
+        }
+        setLoading(false);
+      }
+    );
+
+    return () => subscription.unsubscribe();
   }, [loadProfile]);
 
-  useEffect(() => {
-    refreshSession();
-  }, [refreshSession]);
-
+  // ── Login ────────────────────────────────────────────────────────────────
   const login = useCallback(async (email: string, password: string) => {
     setError(null);
-    try {
-      await account.createEmailPasswordSession(email, password);
-      await refreshSession();
-    } catch (err: any) {
-      console.error('[AUTH] login error:', err);
-      if (err?.message?.includes('CORS') || err?.message?.includes('Access-Control')) {
-        throw new Error('⚠️ CORS Error: The Appwrite domain needs to be configured. Please contact support or check the console logs.');
-      }
-      throw err;
-    }
-  }, [refreshSession]);
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    if (error) throw new Error(error.message);
+  }, []);
 
+  // ── Register company + owner ─────────────────────────────────────────────
   const registerCompany = useCallback(async (
     email: string,
     password: string,
     fullName: string,
     companyName: string,
     dispatchLat: number,
-    dispatchLng: number
+    dispatchLng: number,
   ) => {
     setError(null);
-    console.log('[AUTH] registerCompany: starting');
-    
-    try {
-      // 1. Create the Appwrite auth user
-      console.log('[AUTH] creating auth user...');
-      const newUser = await account.create(ID.unique(), email, password, fullName);
-      console.log('[AUTH] auth user created:', newUser.$id);
 
-      // 2. Log in immediately (Appwrite requires an active session to write documents
-      //    under "users" role permissions)
-      console.log('[AUTH] creating session...');
-      await account.createEmailPasswordSession(email, password);
-      console.log('[AUTH] session created');
+    // 1. Create auth user
+    const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({ email, password });
+    if (signUpErr) throw new Error(signUpErr.message);
+    const userId = signUpData.user?.id;
+    if (!userId) throw new Error('Sign up succeeded but no user ID returned.');
 
-      // 3. Create the company document
-      console.log('[AUTH] creating company document...');
-      const companyDoc = await databases.createDocument(DB_ID, COLLECTIONS.companies, ID.unique(), {
+    // 2. Sign in immediately (session needed for RLS INSERT policies)
+    const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+    if (signInErr) throw new Error(signInErr.message);
+
+    // 3. Create company
+    const { data: comp, error: compErr } = await supabase
+      .from('companies')
+      .insert({
         name: companyName,
-        slug: companyName.toLowerCase().replace(/\s+/g, '-'),
-        dispatchLat,
-        dispatchLng,
-        dispatchAddress: '',
-      });
-      console.log('[AUTH] company document created:', companyDoc.$id);
+        slug: companyName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
+        dispatch_lat: dispatchLat,
+        dispatch_lng: dispatchLng,
+        dispatch_address: '',
+      })
+      .select()
+      .single();
 
-      // 4. Create the user profile document — document ID matches the auth user ID
-      //    so we can look it up directly with getDocument(userId) on future logins
-      console.log('[AUTH] creating user profile document with ID=', newUser.$id);
-      await databases.createDocument(DB_ID, COLLECTIONS.users, newUser.$id, {
-        companyId: companyDoc.$id,
+    if (compErr || !comp) throw new Error(compErr?.message || 'Failed to create company.');
+
+    // 4. Create user profile — doc ID = auth user ID
+    const { error: profErr } = await supabase
+      .from('profiles')
+      .insert({
+        id: userId,
+        company_id: comp.id,
         email,
-        fullName,
+        full_name: fullName,
         role: 'owner',
-        phone: '',
         active: true,
       });
-      console.log('[AUTH] user profile document created');
 
-      console.log('[AUTH] calling refreshSession...');
-      await refreshSession();
-      console.log('[AUTH] refreshSession complete');
-    } catch (err: any) {
-      console.error('[AUTH] registerCompany error:', err);
-      
-      // Provide helpful message for CORS errors
-      if (err?.message?.includes('CORS') || err?.message?.includes('Access-Control')) {
-        throw new Error('⚠️ CORS Error: The Appwrite domain needs to be configured. Please contact support or check the console logs.');
-      }
-      throw err;
-    }
-  }, [refreshSession]);
+    if (profErr) throw new Error(profErr.message);
 
+    // 5. Load profile into state
+    await loadProfile(userId);
+  }, [loadProfile]);
+
+  // ── Logout ───────────────────────────────────────────────────────────────
   const logout = useCallback(async () => {
-    try { await account.deleteSession('current'); } catch {}
-    setAuthUser(null);
-    setProfile(null);
-    setCompany(null);
+    await supabase.auth.signOut();
+    setAuthUser(null); setProfile(null); setCompany(null);
   }, []);
 
-  return { authUser, profile, company, loading, error, login, registerCompany, logout, refreshSession };
+  return {
+    authUser,
+    profile,
+    company,
+    loading,
+    error,
+    login,
+    registerCompany,
+    logout,
+  };
 }
