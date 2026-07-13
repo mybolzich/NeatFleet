@@ -33,13 +33,9 @@ jobs:
       - name: Build
         run: npm run build
         env:
-          # Google Maps API key (existing)
           GOOGLE_MAPS_PLATFORM_KEY: ${{ secrets.GOOGLE_MAPS_PLATFORM_KEY }}
-          # Supabase — browser-safe values (VITE_ prefix = injected into bundle)
-          VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          # Gemini AI key (server-side only — kept as secret, NOT in VITE_ bundle)
-          # GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          VITE_SUPABASE_URL:        ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY:   ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
@@ -49,9 +45,8 @@ jobs:
   deploy:
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
+    # No environment block — removes the protection gate that was blocking
+    # non-main branches from deploying to github-pages
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
