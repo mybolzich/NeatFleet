@@ -14,7 +14,8 @@ import { FleetManager } from './components/FleetManager';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { AuthScreen } from './components/AuthScreen';
 import { useAuthFirebase } from './lib/useAuthFirebase';
-import { useCloudSync } from './lib/useCloudSync';
+import { useVehicles } from './lib/hooks/useVehicles';
+import { useOrders } from './lib/hooks/useOrders';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const CENTRAL_DEPOT: Depot = {
@@ -52,8 +53,10 @@ const today = () => new Date().toLocaleDateString('en-US', { weekday:'short', mo
 export default function App() {
   const auth = useAuthFirebase();
 
-  const [stops, setStops]           = useState<Stop[]>([]);
-  const [vehicles, setVehicles]     = useState<Vehicle[]>(INITIAL_VEHICLES);
+  const companyId = auth.company?.$id ?? null;
+  const { orders: stops, loading: stopsLoading, addOrder, updateOrder, deleteOrder, clearAllOrders } = useOrders(companyId);
+  const { vehicles, loading: vehiclesLoading, addVehicle, updateVehicle, deleteVehicle } = useVehicles(companyId);
+
   const [depot]                     = useState<Depot>(CENTRAL_DEPOT);
   const [trafficZones]              = useState<TrafficZone[]>(INITIAL_TRAFFIC);
   const [config, setConfig]         = useState<OptimizerConfig>({ minimizeVehicles: false, timeWindowWeight: 4, capacityWeight: 5, trafficAware: true });
@@ -62,44 +65,29 @@ export default function App() {
   const [routeStatus, setRouteStatus] = useState<RouteStatus>('unbuilt');
   const [selectedStopId, setSelectedStopId] = useState<string | null>(null);
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
-  const [expandedCrews, setExpandedCrews] = useState<Set<string>>(new Set(['v1']));
+  const [expandedCrews, setExpandedCrews] = useState<Set<string>>(new Set());
   const [serviceDate, setServiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [building, setBuilding]     = useState(false);
 
-  // Cloud sync (localStorage MVP)
-  const companyId = auth.company?.$id ?? null;
-  useCloudSync(companyId, stops, setStops, vehicles, setVehicles, depot, () => {}, trafficZones, () => {});
-
   // ── Stop CRUD ────────────────────────────────────────────────────────────
-  const handleAddStop = useCallback((newStop: Omit<Stop,'id'|'status'|'assignedVehicleId'|'stopSequence'|'eta'|'arrivalTime'>) => {
-    const stop: Stop = {
-      ...newStop,
-      id: `s_${Date.now()}`,
-      status: 'Pending',
-      assignedVehicleId: null,
-      stopSequence: null,
-      eta: null,
-      arrivalTime: null,
-    };
-    setStops(prev => [...prev, stop]);
+  const handleAddStop = useCallback(async (newStop: Omit<Stop,'id'|'status'|'assignedVehicleId'|'stopSequence'|'eta'|'arrivalTime'>) => {
+    await addOrder(newStop);
     setRouteStatus('unbuilt');
-  }, []);
+  }, [addOrder]);
 
-  const handleDeleteStop = useCallback((id: string) => {
-    setStops(prev => prev.filter(s => s.id !== id));
+  const handleDeleteStop = useCallback(async (id: string) => {
+    await deleteOrder(id);
     if (selectedStopId === id) setSelectedStopId(null);
     setRouteStatus('unbuilt');
-  }, [selectedStopId]);
+  }, [selectedStopId, deleteOrder]);
 
-  const handleClearAllStops = useCallback(() => {
-    setStops([]);
+  const handleClearAllStops = useCallback(async () => {
+    await clearAllOrders();
     setRouteStatus('unbuilt');
-  }, []);
+  }, [clearAllOrders]);
 
-  const handleMapClickAdd = useCallback((x: number, y: number) => {
-    // Map click creates a placeholder stop (user fills details in Orders panel)
-    const stop: Stop = {
-      id: `s_${Date.now()}`,
+  const handleMapClickAdd = useCallback(async (x: number, y: number) => {
+    const stop = await addOrder({
       name: `Stop ${stops.length + 1}`,
       customer: 'New Customer',
       x, y,
@@ -109,36 +97,31 @@ export default function App() {
       timeWindowEnd: 480,
       serviceDuration: 20,
       priority: 'Medium',
-      status: 'Pending',
-      assignedVehicleId: null,
-      stopSequence: null,
-      eta: null,
-      arrivalTime: null,
-    };
-    setStops(prev => [...prev, stop]);
-    setSelectedStopId(stop.id);
-    setTab('orders');
+    });
+    if (stop) {
+      setSelectedStopId(stop.id);
+      setTab('orders');
+    }
     setRouteStatus('unbuilt');
-  }, [stops.length]);
+  }, [stops.length, addOrder]);
 
-  const handleUpdateStopCoords = useCallback((id: string, x: number, y: number) => {
-    setStops(prev => prev.map(s => s.id === id ? { ...s, x, y } : s));
+  const handleUpdateStopCoords = useCallback(async (id: string, x: number, y: number) => {
+    await updateOrder(id, { x, y });
     setRouteStatus('unbuilt');
-  }, []);
+  }, [updateOrder]);
 
   // ── Vehicle CRUD ─────────────────────────────────────────────────────────
-  const handleAddVehicle = (v: Omit<Vehicle,'id'|'status'|'metrics'>) => {
-    setVehicles(prev => [...prev, {
-      ...v, id: `v_${Date.now()}`, status: 'Idle',
-      metrics: { totalDistance:0, totalTime:0, loadUsed:0, delayCount:0, totalCost:0 },
-    }]);
-  };
-  const handleUpdateVehicle = (id: string, updates: Partial<Vehicle>) => {
-    setVehicles(prev => prev.map(v => v.id === id ? { ...v, ...updates } : v));
-  };
-  const handleDeleteVehicle = (id: string) => {
-    setVehicles(prev => prev.filter(v => v.id !== id));
-  };
+  const handleAddVehicle = useCallback(async (v: Omit<Vehicle,'id'|'status'|'metrics'>) => {
+    await addVehicle(v);
+  }, [addVehicle]);
+
+  const handleUpdateVehicle = useCallback(async (id: string, updates: Partial<Vehicle>) => {
+    await updateVehicle(id, updates);
+  }, [updateVehicle]);
+
+  const handleDeleteVehicle = useCallback(async (id: string) => {
+    await deleteVehicle(id);
+  }, [deleteVehicle]);
 
   // ── Build Routes ─────────────────────────────────────────────────────────
   const handleBuildRoutes = useCallback(async () => {
@@ -146,39 +129,46 @@ export default function App() {
     setBuilding(true);
     await new Promise(r => setTimeout(r, 600)); // brief visual feedback
     const { optimizedStops, optimizedVehicles } = optimizeRoutes(stops, vehicles, depot, trafficZones, config);
-    setStops(optimizedStops);
-    setVehicles(optimizedVehicles);
+    await Promise.all([
+      ...optimizedStops.map(s => updateOrder(s.id, {
+        assignedVehicleId: s.assignedVehicleId,
+        stopSequence: s.stopSequence,
+        eta: s.eta,
+        arrivalTime: s.arrivalTime,
+        status: s.status,
+      })),
+      ...optimizedVehicles.map(v => updateVehicle(v.id, { status: v.status, metrics: v.metrics })),
+    ]);
     setRouteStatus('built');
     setTab('routes');
     setBuilding(false);
-    // Auto-expand all crews with stops
     const withStops = new Set(optimizedStops.filter(s => s.assignedVehicleId).map(s => s.assignedVehicleId!));
     setExpandedCrews(withStops);
-  }, [stops, vehicles, depot, trafficZones, config]);
+  }, [stops, vehicles, depot, trafficZones, config, updateOrder, updateVehicle]);
 
   // ── Dispatch ─────────────────────────────────────────────────────────────
-  const handleDispatch = useCallback(() => {
+  const handleDispatch = useCallback(async () => {
     if (routeStatus !== 'built') return;
     setRouteStatus('dispatched');
-    setVehicles(prev => prev.map(v =>
-      v.metrics.loadUsed > 0 ? { ...v, status: 'Active' } : v
-    ));
-    setStops(prev => prev.map(s =>
-      s.assignedVehicleId ? { ...s, status: 'In Transit' } : s
-    ));
-  }, [routeStatus]);
+    await Promise.all([
+      ...vehicles.filter(v => v.metrics.loadUsed > 0).map(v => updateVehicle(v.id, { status: 'Active' })),
+      ...stops.filter(s => s.assignedVehicleId).map(s => updateOrder(s.id, { status: 'In Transit' })),
+    ]);
+  }, [routeStatus, vehicles, stops, updateVehicle, updateOrder]);
 
   // ── Reset ─────────────────────────────────────────────────────────────────
-  const handleReset = useCallback(() => {
-    setStops(prev => prev.map(s => ({
-      ...s, assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null, status: 'Pending'
-    })));
-    setVehicles(prev => prev.map(v => ({
-      ...v, status: 'Idle',
-      metrics: { totalDistance:0, totalTime:0, loadUsed:0, delayCount:0, totalCost:0 }
-    })));
+  const handleReset = useCallback(async () => {
+    await Promise.all([
+      ...stops.map(s => updateOrder(s.id, {
+        assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null, status: 'Pending',
+      })),
+      ...vehicles.map(v => updateVehicle(v.id, {
+        status: 'Idle',
+        metrics: { totalDistance: 0, totalTime: 0, loadUsed: 0, delayCount: 0, totalCost: 0 },
+      })),
+    ]);
     setRouteStatus('unbuilt');
-  }, []);
+  }, [stops, vehicles, updateOrder, updateVehicle]);
 
   // ── Export CSV ────────────────────────────────────────────────────────────
   const handleExportCSV = useCallback(() => {
@@ -206,11 +196,11 @@ export default function App() {
     dragStopRef.current = { stopId, fromVehicleId };
   };
 
-  const handleDropOnVehicle = (toVehicleId: string) => {
+  const handleDropOnVehicle = async (toVehicleId: string) => {
     if (!dragStopRef.current) return;
     const { stopId } = dragStopRef.current;
-    setStops(prev => prev.map(s => s.id === stopId ? { ...s, assignedVehicleId: toVehicleId } : s));
     dragStopRef.current = null;
+    await updateOrder(stopId, { assignedVehicleId: toVehicleId });
     if (routeStatus === 'dispatched') setRouteStatus('built');
   };
 
@@ -233,6 +223,17 @@ export default function App() {
 
   if (!auth.authUser || !auth.profile || !auth.company) {
     return <AuthScreen auth={auth} />;
+  }
+
+  if (stopsLoading || vehiclesLoading) {
+    return (
+      <div className="h-screen flex items-center justify-center bg-slate-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-8 h-8 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+          <p className="text-sm text-slate-500 font-medium">Loading fleet data...</p>
+        </div>
+      </div>
+    );
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
