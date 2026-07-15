@@ -126,27 +126,29 @@ export function useAuth() {
         if (signInErr) throw new Error(signInErr.message);
       }
 
-      // 3. Create company
-      const { data: comp, error: compErr } = await supabase
+      // 3. Create company — pre-generate UUID client-side so we don't need
+      //    INSERT...RETURNING, which would also trigger the SELECT policy
+      //    (my_company_id() returns NULL before the profile exists → RLS error).
+      const companyId = crypto.randomUUID();
+      const { error: compErr } = await supabase
         .from('companies')
         .insert({
+          id: companyId,
           name: companyName,
           slug: companyName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
           dispatch_lat: dispatchLat,
           dispatch_lng: dispatchLng,
           dispatch_address: '',
-        })
-        .select()
-        .single();
+        });
 
-      if (compErr || !comp) throw new Error(compErr?.message || 'Failed to create company.');
+      if (compErr) throw new Error(compErr.message);
 
       // 4. Create user profile
       const { error: profErr } = await supabase
         .from('profiles')
         .insert({
           id: userId,
-          company_id: comp.id,
+          company_id: companyId,
           email,
           full_name: fullName,
           role: 'owner',
