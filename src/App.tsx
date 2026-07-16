@@ -13,7 +13,7 @@ import { OrderBook } from './components/OrderBook';
 import { FleetManager } from './components/FleetManager';
 import { AnalyticsPanel } from './components/AnalyticsPanel';
 import { AuthScreen } from './components/AuthScreen';
-import { useAuthFirebase } from './lib/useAuthFirebase';
+import { useAuth } from './lib/useAuth';
 import { useVehicles } from './lib/hooks/useVehicles';
 import { useOrders } from './lib/hooks/useOrders';
 
@@ -51,9 +51,9 @@ const today = () => new Date().toLocaleDateString('en-US', { weekday:'short', mo
 
 // ── Main App ──────────────────────────────────────────────────────────────
 export default function App() {
-  const auth = useAuthFirebase();
+  const auth = useAuth();
 
-  const companyId = auth.company?.$id ?? null;
+  const companyId = auth.company?.id ?? null;
   const { orders: stops, loading: stopsLoading, addOrder, updateOrder, deleteOrder, clearAllOrders } = useOrders(companyId);
   const { vehicles, loading: vehiclesLoading, addVehicle, updateVehicle, deleteVehicle } = useVehicles(companyId);
 
