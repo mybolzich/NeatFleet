@@ -1,5 +1,6 @@
 import express from "express";
 import path from "path";
+import { spawn } from "child_process";
 import { createServer as createViteServer } from "vite";
 import { GoogleGenAI } from "@google/genai";
 import dotenv from "dotenv";
@@ -113,6 +114,36 @@ Optimization Mode:
     console.error("Gemini API Error:", error);
     res.status(500).json({ error: error.message || "Failed to analyze route profile." });
   }
+});
+
+// OR-Tools VRP solver — local dev proxy.
+// Production (Vercel) serves api/optimize.py directly as a Python serverless
+// function; this route exists so `npm run dev` (plain Express, no Vercel
+// runtime) can still exercise the same solver by spawning python3 locally.
+// If python3/ortools aren't installed, this fails fast and the frontend's
+// OptimizationProvider falls back to the in-browser heuristic.
+app.post("/api/optimize", (req, res) => {
+  const child = spawn("python3", [path.join(process.cwd(), "api", "optimize_cli.py")]);
+
+  let stdout = "";
+  let stderr = "";
+  child.stdout.on("data", (chunk) => { stdout += chunk; });
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+
+  child.on("error", (err) => {
+    res.status(503).json({ error: `OR-Tools solver unavailable: ${err.message}` });
+  });
+
+  child.on("close", (code) => {
+    if (code !== 0) {
+      console.error("OR-Tools solver exited with error:", stderr);
+      return res.status(503).json({ error: "OR-Tools solver failed", detail: stderr });
+    }
+    res.type("application/json").send(stdout);
+  });
+
+  child.stdin.write(JSON.stringify(req.body));
+  child.stdin.end();
 });
 
 // Vite Middleware & Static Serves

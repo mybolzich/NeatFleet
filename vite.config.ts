@@ -7,13 +7,9 @@ export default defineConfig(() => {
   return {
     base: '/NeatFleet/',
     plugins: [react(), tailwindcss()],
-    define: {
-      // Injected at build time from GitHub Actions secrets / .env.local
-      'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || ''),
-    },
-    // VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are automatically
-    // injected by Vite from env vars — no need to list them here.
-    // Access in code via: import.meta.env.VITE_SUPABASE_URL
+    // All app env vars (VITE_SUPABASE_URL, VITE_MAP_TILE_URL, VITE_ORS_API_KEY,
+    // etc.) use the VITE_ prefix, so Vite injects them into import.meta.env
+    // automatically — no explicit `define` block needed.
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

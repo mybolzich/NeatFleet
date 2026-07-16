@@ -8,7 +8,7 @@ import {
   Navigation2, CheckSquare,
 } from 'lucide-react';
 import { Stop, Vehicle, Depot, TrafficZone, OptimizerConfig } from './types';
-import { optimizeRoutes } from './utils/optimizer';
+import { getOptimizationProvider } from './lib/providers/optimization';
 import { generatePreset } from './utils/presets';
 import type { PresetKey } from './utils/presets';
 import { InteractiveMap } from './components/InteractiveMap';
@@ -76,6 +76,7 @@ export default function App() {
   const [expandedCrews, setExpandedCrews] = useState<Set<string>>(new Set());
   const [serviceDate, setServiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [building, setBuilding]     = useState(false);
+  const [optimizerBackend, setOptimizerBackend] = useState<'or-tools' | 'heuristic' | null>(null);
 
   const { routePlans, buildPlans, dispatchVehicle, dispatchPlans, clearPlans } = useRoutePlans(companyId, serviceDate);
   const { logEvent } = useDispatchEvents(companyId);
@@ -163,8 +164,9 @@ export default function App() {
   const handleBuildRoutes = useCallback(async () => {
     if (stops.length === 0) return;
     setBuilding(true);
-    await new Promise(r => setTimeout(r, 600)); // brief visual feedback
-    const { optimizedStops, optimizedVehicles } = optimizeRoutes(stops, vehicles, depot, trafficZones, config);
+    const { optimizedStops, optimizedVehicles, backend } =
+      await getOptimizationProvider().optimizeRoutesWithBackend(stops, vehicles, depot, trafficZones, config);
+    setOptimizerBackend(backend);
     await Promise.all([
       ...optimizedStops.map(s => updateOrder(s.id, {
         assignedVehicleId: s.assignedVehicleId,
@@ -541,6 +543,15 @@ export default function App() {
               {routeStatus === 'unbuilt' && stops.length > 0 && (
                 <span className="text-[10px] bg-white/90 border border-slate-200 text-slate-500 px-2 py-1 rounded-lg shadow-sm">
                   {stops.length} stop{stops.length !== 1 ? 's' : ''} ready to route
+                </span>
+              )}
+              {routeStatus !== 'unbuilt' && optimizerBackend && (
+                <span className={`text-[10px] font-bold px-2 py-1 rounded-lg shadow-sm border ${
+                  optimizerBackend === 'or-tools'
+                    ? 'bg-white/90 border-emerald-200 text-emerald-700'
+                    : 'bg-white/90 border-amber-200 text-amber-700'
+                }`} title={optimizerBackend === 'heuristic' ? 'OR-Tools solver unavailable — used local fallback heuristic' : 'Solved with Google OR-Tools'}>
+                  {optimizerBackend === 'or-tools' ? 'OR-Tools solver' : 'Local heuristic (fallback)'}
                 </span>
               )}
             </div>
