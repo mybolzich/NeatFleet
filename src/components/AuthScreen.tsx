@@ -11,11 +11,9 @@ export function AuthScreen({ auth }: AuthScreenProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Login fields
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
 
-  // Register fields
   const [regCompany, setRegCompany] = useState('');
   const [regName, setRegName] = useState('');
   const [regEmail, setRegEmail] = useState('');
@@ -45,18 +43,14 @@ export function AuthScreen({ auth }: AuthScreenProps) {
       return;
     }
     if (regPassword.length < 8) {
-      setError('Password must be at least 8 characters (Appwrite requirement).');
+      setError('Password must be at least 8 characters.');
       return;
     }
     setLoading(true);
     try {
       await auth.registerCompany(
-        regEmail,
-        regPassword,
-        regName,
-        regCompany,
-        parseFloat(regLat) || 0,
-        parseFloat(regLng) || 0
+        regEmail, regPassword, regName, regCompany,
+        parseFloat(regLat) || 0, parseFloat(regLng) || 0
       );
     } catch (err: any) {
       let msg = err?.message || 'Registration failed.';
@@ -68,127 +62,150 @@ export function AuthScreen({ auth }: AuthScreenProps) {
   }
 
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gradient-to-br from-slate-50 to-blue-50">
-      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 p-8">
-        <div className="flex items-center gap-2 mb-1">
-          <div className="p-2 bg-blue-600 rounded-lg">
-            <Truck size={20} className="text-white" />
-          </div>
-          <span className="text-xl font-bold text-slate-900 tracking-tight">NeatFleet</span>
-        </div>
-        <p className="text-sm text-slate-500 mb-6">Fleet routing & dispatch dashboard</p>
+    <div style={{
+      minHeight: '100dvh',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      background: 'var(--bg)',
+      padding: '24px 16px',
+    }}>
+      {/* Card */}
+      <div className="card fade-in" style={{
+        width: '100%',
+        maxWidth: 420,
+        padding: '32px 28px',
+      }}>
 
+        {/* Brand */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 6 }}>
+          <div style={{
+            width: 44, height: 44,
+            borderRadius: 12,
+            background: 'var(--green-dark)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: 'var(--shadow-md)',
+          }}>
+            <Truck size={22} color="#fff" />
+          </div>
+          <div>
+            <div style={{ fontSize: 20, fontWeight: 800, color: 'var(--text-1)', letterSpacing: '-0.02em' }}>
+              NeatFleet
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-3)', fontWeight: 600, letterSpacing: '0.03em' }}>
+              Fleet routing & dispatch
+            </div>
+          </div>
+        </div>
+
+        {/* Mode toggle */}
+        <div style={{
+          display: 'flex',
+          background: 'var(--bg)',
+          borderRadius: 'var(--radius-sm)',
+          padding: 4,
+          marginTop: 24,
+          marginBottom: 24,
+        }}>
+          {(['login', 'register'] as const).map(m => (
+            <button key={m} onClick={() => { setMode(m); setError(null); }} style={{
+              flex: 1,
+              padding: '8px 0',
+              borderRadius: 8,
+              fontSize: 13,
+              fontWeight: 700,
+              border: 'none',
+              background: mode === m ? 'var(--surface)' : 'transparent',
+              color: mode === m ? 'var(--text-1)' : 'var(--text-3)',
+              boxShadow: mode === m ? 'var(--shadow)' : 'none',
+              transition: 'all .15s',
+            }}>
+              {m === 'login' ? 'Sign In' : 'Register'}
+            </button>
+          ))}
+        </div>
+
+        {/* Error */}
         {error && (
-          <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
+          <div style={{
+            marginBottom: 16,
+            padding: '10px 14px',
+            borderRadius: 'var(--radius-sm)',
+            background: 'var(--red-light)',
+            border: '1px solid #FECACA',
+            color: 'var(--red)',
+            fontSize: 13,
+            fontWeight: 600,
+          }}>
             {error}
           </div>
         )}
 
         {mode === 'login' ? (
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Email</label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="you@company.com"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="••••••••"
-              />
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition disabled:opacity-60"
-            >
-              {loading && <Loader2 size={16} className="animate-spin" />}
-              {loading ? 'Signing in…' : 'Sign In'}
+          <form onSubmit={handleLogin} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="Email">
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                className="input" placeholder="you@company.com" />
+            </Field>
+            <Field label="Password">
+              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
+                className="input" placeholder="••••••••" />
+            </Field>
+            <button type="submit" disabled={loading} className="btn btn-green btn-full" style={{ marginTop: 4 }}>
+              {loading
+                ? <><Loader2 size={16} style={{ animation: 'spin .7s linear infinite' }} /> Signing in…</>
+                : 'Sign In'
+              }
             </button>
-            <p className="text-center text-sm text-slate-500 pt-2">
-              New company?{' '}
-              <button type="button" onClick={() => { setMode('register'); setError(null); }} className="text-blue-600 font-medium hover:underline">
-                Register here
-              </button>
-            </p>
           </form>
         ) : (
-          <form onSubmit={handleRegister} className="space-y-4">
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Company Name</label>
-              <input
-                type="text" value={regCompany} onChange={(e) => setRegCompany(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="Cornerstone Landscape"
-              />
+          <form onSubmit={handleRegister} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <Field label="Company Name">
+              <input type="text" value={regCompany} onChange={e => setRegCompany(e.target.value)}
+                className="input" placeholder="Acme Logistics" />
+            </Field>
+            <Field label="Your Full Name">
+              <input type="text" value={regName} onChange={e => setRegName(e.target.value)}
+                className="input" placeholder="Jane Smith" />
+            </Field>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Email">
+                <input type="email" value={regEmail} onChange={e => setRegEmail(e.target.value)}
+                  className="input" />
+              </Field>
+              <Field label="Password">
+                <input type="password" value={regPassword} onChange={e => setRegPassword(e.target.value)}
+                  className="input" placeholder="8+ chars" />
+              </Field>
             </div>
-            <div>
-              <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Your Full Name</label>
-              <input
-                type="text" value={regName} onChange={(e) => setRegName(e.target.value)}
-                className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                placeholder="Jane Smith"
-              />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <Field label="Depot Lat">
+                <input type="number" step="0.0001" value={regLat} onChange={e => setRegLat(e.target.value)}
+                  className="input" />
+              </Field>
+              <Field label="Depot Lng">
+                <input type="number" step="0.0001" value={regLng} onChange={e => setRegLng(e.target.value)}
+                  className="input" />
+              </Field>
             </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Email</label>
-                <input
-                  type="email" value={regEmail} onChange={(e) => setRegEmail(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Password</label>
-                <input
-                  type="password" value={regPassword} onChange={(e) => setRegPassword(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  placeholder="8+ characters"
-                />
-              </div>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Dispatch Lat</label>
-                <input
-                  type="number" step="0.0001" value={regLat} onChange={(e) => setRegLat(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Dispatch Lng</label>
-                <input
-                  type="number" step="0.0001" value={regLng} onChange={(e) => setRegLng(e.target.value)}
-                  className="w-full px-3.5 py-2.5 rounded-lg border border-slate-300 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                />
-              </div>
-            </div>
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg transition disabled:opacity-60"
-            >
-              {loading && <Loader2 size={16} className="animate-spin" />}
-              {loading ? 'Creating…' : 'Create Company & Sign In'}
+            <button type="submit" disabled={loading} className="btn btn-green btn-full" style={{ marginTop: 4 }}>
+              {loading
+                ? <><Loader2 size={16} style={{ animation: 'spin .7s linear infinite' }} /> Creating…</>
+                : 'Create Company & Sign In'
+              }
             </button>
-            <p className="text-center text-sm text-slate-500 pt-2">
-              Already registered?{' '}
-              <button type="button" onClick={() => { setMode('login'); setError(null); }} className="text-blue-600 font-medium hover:underline">
-                Sign in
-              </button>
-            </p>
           </form>
         )}
       </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div>
+      <div className="label-sm" style={{ marginBottom: 6 }}>{label}</div>
+      {children}
     </div>
   );
 }
