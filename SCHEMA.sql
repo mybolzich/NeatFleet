@@ -161,3 +161,31 @@ CREATE POLICY "stops_all"
 
 CREATE INDEX IF NOT EXISTS stops_company_id_idx ON stops (company_id);
 CREATE INDEX IF NOT EXISTS stops_assigned_vehicle_id_idx ON stops (assigned_vehicle_id);
+
+-- ── route_plans ───────────────────────────────────────────────────────────
+-- One row per vehicle per service date; tracks build → dispatch lifecycle.
+-- Lets the dispatcher UI survive page refreshes and syncs to driver devices.
+
+CREATE TABLE IF NOT EXISTS route_plans (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id    uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
+  vehicle_id    uuid NOT NULL REFERENCES vehicles  ON DELETE CASCADE,
+  service_date  date NOT NULL,
+  status        text NOT NULL DEFAULT 'built'
+                     CHECK (status IN ('built', 'dispatched', 'active', 'completed')),
+  stop_count    int4 NOT NULL DEFAULT 0,
+  dispatched_at timestamptz,
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (company_id, vehicle_id, service_date)
+);
+
+ALTER TABLE route_plans ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "route_plans_all"
+  ON route_plans FOR ALL
+  TO authenticated
+  USING (company_id = my_company_id())
+  WITH CHECK (company_id = my_company_id());
+
+CREATE INDEX IF NOT EXISTS route_plans_company_date_idx
+  ON route_plans (company_id, service_date);

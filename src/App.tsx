@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Truck, MapPin, BarChart2, Download, Calendar,
   Play, CheckCircle2, Send, RotateCcw, Plus,
@@ -16,6 +16,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { useAuth } from './lib/useAuth';
 import { useVehicles } from './lib/hooks/useVehicles';
 import { useOrders } from './lib/hooks/useOrders';
+import { useRoutePlans } from './lib/hooks/useRoutePlans';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const CENTRAL_DEPOT: Depot = {
@@ -68,6 +69,20 @@ export default function App() {
   const [expandedCrews, setExpandedCrews] = useState<Set<string>>(new Set());
   const [serviceDate, setServiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [building, setBuilding]     = useState(false);
+
+  const { routePlans, buildPlans, dispatchPlans, clearPlans } = useRoutePlans(companyId, serviceDate);
+
+  // Restore route status from persisted plans after initial data load
+  const routeStatusInitialized = useRef(false);
+  useEffect(() => {
+    if (vehiclesLoading || stopsLoading || routeStatusInitialized.current) return;
+    routeStatusInitialized.current = true;
+    if (routePlans.some(p => p.status === 'dispatched')) {
+      setRouteStatus('dispatched');
+    } else if (stops.some(s => s.assignedVehicleId !== null)) {
+      setRouteStatus('built');
+    }
+  }, [vehiclesLoading, stopsLoading, routePlans, stops]);
 
   // ── Stop CRUD ────────────────────────────────────────────────────────────
   const handleAddStop = useCallback(async (newStop: Omit<Stop,'id'|'status'|'assignedVehicleId'|'stopSequence'|'eta'|'arrivalTime'>) => {
@@ -139,6 +154,16 @@ export default function App() {
       })),
       ...optimizedVehicles.map(v => updateVehicle(v.id, { status: v.status, metrics: v.metrics })),
     ]);
+
+    // Persist route plan entries for each vehicle that got stops assigned
+    const planEntries = optimizedVehicles
+      .filter(v => optimizedStops.some(s => s.assignedVehicleId === v.id))
+      .map(v => ({
+        vehicleId: v.id,
+        stopCount: optimizedStops.filter(s => s.assignedVehicleId === v.id).length,
+      }));
+    await buildPlans(planEntries);
+
     setRouteStatus('built');
     setTab('routes');
     setBuilding(false);
@@ -151,14 +176,16 @@ export default function App() {
     if (routeStatus !== 'built') return;
     setRouteStatus('dispatched');
     await Promise.all([
+      dispatchPlans(),
       ...vehicles.filter(v => v.metrics.loadUsed > 0).map(v => updateVehicle(v.id, { status: 'Active' })),
       ...stops.filter(s => s.assignedVehicleId).map(s => updateOrder(s.id, { status: 'In Transit' })),
     ]);
-  }, [routeStatus, vehicles, stops, updateVehicle, updateOrder]);
+  }, [routeStatus, vehicles, stops, updateVehicle, updateOrder, dispatchPlans]);
 
   // ── Reset ─────────────────────────────────────────────────────────────────
   const handleReset = useCallback(async () => {
     await Promise.all([
+      clearPlans(),
       ...stops.map(s => updateOrder(s.id, {
         assignedVehicleId: null, stopSequence: null, eta: null, arrivalTime: null, status: 'Pending',
       })),
@@ -168,7 +195,7 @@ export default function App() {
       })),
     ]);
     setRouteStatus('unbuilt');
-  }, [stops, vehicles, updateOrder, updateVehicle]);
+  }, [stops, vehicles, updateOrder, updateVehicle, clearPlans]);
 
   // ── Export CSV ────────────────────────────────────────────────────────────
   const handleExportCSV = useCallback(() => {
@@ -596,6 +623,7 @@ function RoutesPanel({
 function StopRow({ stop, vehicle, index, selected, onSelect, onDelete, onDragStart }: {
   stop: Stop; vehicle: Vehicle | null; index?: number;
   selected: boolean; onSelect: () => void; onDelete: () => void; onDragStart: () => void;
+  key?: string;
 }) {
   const isDelayed = stop.arrivalTime !== null && stop.arrivalTime > stop.timeWindowEnd;
   return (
