@@ -31,11 +31,18 @@ jobs:
         run: npm ci
 
       - name: Build
+        # NOTE: GitHub Pages is static-only hosting — it cannot serve the
+        # api/optimize.py OR-Tools function. On this deploy target, Build
+        # Routes always falls back to the in-browser heuristic. Deploy to
+        # Vercel (or another Python-capable host) to get real OR-Tools
+        # optimization in production.
         run: npm run build
         env:
-          GOOGLE_MAPS_PLATFORM_KEY: ${{ secrets.GOOGLE_MAPS_PLATFORM_KEY }}
-          VITE_SUPABASE_URL:        ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY:   ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_MAP_TILE_URL:         ${{ secrets.VITE_MAP_TILE_URL }}
+          VITE_MAP_TILE_ATTRIBUTION: ${{ secrets.VITE_MAP_TILE_ATTRIBUTION }}
+          VITE_ORS_API_KEY:          ${{ secrets.VITE_ORS_API_KEY }}
+          VITE_SUPABASE_URL:         ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY:    ${{ secrets.VITE_SUPABASE_ANON_KEY }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

@@ -1,106 +1,118 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import type { User } from '@supabase/supabase-js';
 import { supabase } from './supabase';
-
-export interface UserProfile {
-  id: string;
-  company_id: string;
-  email: string;
-  full_name: string;
-  role: 'owner' | 'dispatcher' | 'driver';
-  active: boolean;
-}
 
 export interface CompanyProfile {
   id: string;
   name: string;
   slug: string;
-  dispatch_lat: number;
-  dispatch_lng: number;
-  dispatch_address: string;
+  dispatchLat: number;
+  dispatchLng: number;
+  dispatchAddress: string;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  fullName: string;
+  role: 'owner' | 'dispatcher' | 'driver';
+  companyId: string;
 }
 
 export function useAuth() {
-  const [authUser,  setAuthUser]  = useState<any>(null);
-  const [profile,   setProfile]   = useState<UserProfile | null>(null);
-  const [company,   setCompany]   = useState<CompanyProfile | null>(null);
-  const [loading,   setLoading]   = useState(true);
-  const [error,     setError]     = useState<string | null>(null);
+  const [authUser, setAuthUser] = useState<User | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [company, setCompany] = useState<CompanyProfile | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Prevents onAuthStateChange from overwriting state mid-registration
   const isRegistering = useRef(false);
 
-  // ── Load profile + company ──────────────────────────────────────────────
-  // Returns true if found, false if no profile row yet, throws on real errors
   const loadProfile = useCallback(async (userId: string): Promise<boolean> => {
-    const { data: prof, error: profErr } = await supabase
+    const { data: profileRow, error: profileErr } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', userId)
-      .single();
+      .maybeSingle();
 
-    if (profErr) {
-      if (profErr.code === 'PGRST116') { // no rows — not a real error
-        setProfile(null); setCompany(null);
-        return false;
-      }
-      throw new Error(profErr.message);
+    if (profileErr) {
+      console.error('[AUTH] Error loading profile:', profileErr);
+      return false;
+    }
+    if (!profileRow) {
+      console.warn('[AUTH] No profile found for user:', userId);
+      return false;
     }
 
-    if (!prof) { setProfile(null); setCompany(null); return false; }
-    setProfile(prof as UserProfile);
+    setProfile({
+      id: userId,
+      email: profileRow.email,
+      fullName: profileRow.full_name,
+      role: profileRow.role,
+      companyId: profileRow.company_id,
+    });
 
-    const { data: comp, error: compErr } = await supabase
+    const { data: companyRow, error: companyErr } = await supabase
       .from('companies')
       .select('*')
-      .eq('id', prof.company_id)
-      .single();
+      .eq('id', profileRow.company_id)
+      .maybeSingle();
 
-    if (compErr) throw new Error(compErr.message);
-    if (!comp) { setCompany(null); return false; }
-    setCompany(comp as CompanyProfile);
+    if (companyErr) {
+      console.error('[AUTH] Error loading company:', companyErr);
+      return false;
+    }
+    if (!companyRow) {
+      console.warn('[AUTH] No company found:', profileRow.company_id);
+      return false;
+    }
+
+    setCompany({
+      id: companyRow.id,
+      name: companyRow.name,
+      slug: companyRow.slug,
+      dispatchLat: companyRow.dispatch_lat,
+      dispatchLng: companyRow.dispatch_lng,
+      dispatchAddress: companyRow.dispatch_address ?? '',
+    });
+
     return true;
   }, []);
 
-  // ── Listen to auth state changes ────────────────────────────────────────
   useEffect(() => {
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        setAuthUser(session.user);
-        try { await loadProfile(session.user.id); } catch {}
-      }
-      setLoading(false);
-    });
-
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        if (session?.user) {
-          setAuthUser(session.user);
-          // Skip during registration — registerCompany loads the profile explicitly
-          // after inserts are done, avoiding a race condition where this callback
-          // runs before the profile row exists and resets state to null.
-          if (!isRegistering.current) {
-            try { await loadProfile(session.user.id); } catch {}
-          }
-        } else {
+      async (_event, session) => {
+        if (isRegistering.current) return;
+
+        const user = session?.user ?? null;
+
+        if (!user) {
           setAuthUser(null);
           setProfile(null);
           setCompany(null);
+          setLoading(false);
+          return;
         }
-        setLoading(false);
+
+        setAuthUser(user);
+        try {
+          await loadProfile(user.id);
+        } catch (err) {
+          console.error('[AUTH] profile load error:', err);
+        } finally {
+          setLoading(false);
+        }
       }
     );
+
+    // Resolve any pre-existing session on mount
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (!session) setLoading(false);
+    });
 
     return () => subscription.unsubscribe();
   }, [loadProfile]);
 
-  // ── Login ────────────────────────────────────────────────────────────────
-  const login = useCallback(async (email: string, password: string) => {
-    setError(null);
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw new Error(error.message);
-  }, []);
-
-  // ── Register company + owner ─────────────────────────────────────────────
   const registerCompany = useCallback(async (
     email: string,
     password: string,
@@ -113,64 +125,70 @@ export function useAuth() {
     isRegistering.current = true;
 
     try {
-      // 1. Create auth user
-      const { data: signUpData, error: signUpErr } = await supabase.auth.signUp({ email, password });
-      if (signUpErr) throw new Error(signUpErr.message);
-      const userId = signUpData.user?.id;
-      if (!userId) throw new Error('Sign up succeeded but no user ID returned.');
+      const { data: authData, error: signUpErr } = await supabase.auth.signUp({ email, password });
+      if (signUpErr) throw signUpErr;
+      if (!authData.user) throw new Error('User creation failed.');
 
-      // 2. Ensure a session exists for RLS writes.
-      //    If signUp already returned a session (email confirm disabled), skip re-login.
-      if (!signUpData.session) {
-        const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
-        if (signInErr) throw new Error(signInErr.message);
-      }
-
-      // 3. Create company — pre-generate UUID client-side so we don't need
-      //    INSERT...RETURNING, which would also trigger the SELECT policy
-      //    (my_company_id() returns NULL before the profile exists → RLS error).
+      const userId = authData.user.id;
       const companyId = crypto.randomUUID();
-      const { error: compErr } = await supabase
-        .from('companies')
-        .insert({
-          id: companyId,
-          name: companyName,
-          slug: companyName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, ''),
-          dispatch_lat: dispatchLat,
-          dispatch_lng: dispatchLng,
-          dispatch_address: '',
-        });
 
-      if (compErr) throw new Error(compErr.message);
+      const { error: companyErr } = await supabase.from('companies').insert({
+        id: companyId,
+        name: companyName,
+        slug: companyName.toLowerCase().replace(/\s+/g, '-'),
+        dispatch_lat: dispatchLat,
+        dispatch_lng: dispatchLng,
+        dispatch_address: '',
+      });
+      if (companyErr) throw companyErr;
 
-      // 4. Create user profile
-      const { error: profErr } = await supabase
-        .from('profiles')
-        .insert({
-          id: userId,
-          company_id: companyId,
-          email,
-          full_name: fullName,
-          role: 'owner',
-          active: true,
-        });
+      const { error: profileErr } = await supabase.from('profiles').insert({
+        id: userId,
+        company_id: companyId,
+        email,
+        full_name: fullName,
+        role: 'owner',
+      });
+      if (profileErr) throw profileErr;
 
-      if (profErr) throw new Error(profErr.message);
-
-      // 5. Load profile — must happen before isRegistering is cleared
-      const loaded = await loadProfile(userId);
-      if (!loaded) throw new Error('Account created but profile could not be loaded. Please sign in manually.');
-
-      setAuthUser(signUpData.user);
+      // Set state manually so the app transitions immediately
+      setAuthUser(authData.user);
+      setProfile({ id: userId, email, fullName, role: 'owner', companyId });
+      setCompany({
+        id: companyId,
+        name: companyName,
+        slug: companyName.toLowerCase().replace(/\s+/g, '-'),
+        dispatchLat,
+        dispatchLng,
+        dispatchAddress: '',
+      });
+      setLoading(false);
+    } catch (err: any) {
+      setError(err?.message ?? 'Registration failed.');
+      throw err;
     } finally {
       isRegistering.current = false;
     }
-  }, [loadProfile]);
+  }, []);
 
-  // ── Logout ───────────────────────────────────────────────────────────────
+  const login = useCallback(async (email: string, password: string) => {
+    setError(null);
+    try {
+      const { error: signInErr } = await supabase.auth.signInWithPassword({ email, password });
+      if (signInErr) throw signInErr;
+    } catch (err: any) {
+      const msg = err?.message ?? 'Login failed.';
+      setError(msg);
+      throw new Error(msg);
+    }
+  }, []);
+
   const logout = useCallback(async () => {
-    await supabase.auth.signOut();
-    setAuthUser(null); setProfile(null); setCompany(null);
+    try {
+      await supabase.auth.signOut();
+    } catch (err: any) {
+      console.error('[AUTH] logout error:', err);
+    }
   }, []);
 
   return { authUser, profile, company, loading, error, login, registerCompany, logout };

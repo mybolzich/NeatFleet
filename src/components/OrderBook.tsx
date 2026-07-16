@@ -1,26 +1,19 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ShoppingBag, Search, Plus, Trash2, MapPin, Sparkles, HelpCircle, TriangleAlert, Loader2 } from 'lucide-react';
 import { Stop, Priority } from '../types';
+import { getGeocodingProvider } from '../lib/providers/geocoding';
+import type { GeocodeSuggestion } from '../lib/providers/types';
 
-const MAPS_KEY = (process.env.GOOGLE_MAPS_PLATFORM_KEY as string) || '';
-
-// Geocode an address string → {lat, lng} using Google Geocoding API
+// Geocode an address string → {lat, lng} via the configured GeocodingProvider
+// (OpenRouteService by default — see src/lib/providers/geocoding).
 async function geocodeAddress(address: string): Promise<{ lat: number; lng: number } | null> {
-  try {
-    const url = `https://maps.googleapis.com/maps/api/geocode/json?address=${encodeURIComponent(address)}&key=${MAPS_KEY}`;
-    const res = await fetch(url);
-    const data = await res.json();
-    if (data.status === 'OK' && data.results.length > 0) {
-      const loc = data.results[0].geometry.location;
-      return { lat: loc.lat, lng: loc.lng };
-    }
-    return null;
-  } catch {
-    return null;
-  }
+  const result = await getGeocodingProvider().geocode(address);
+  return result ? { lat: result.lat, lng: result.lng } : null;
 }
 
-// Google Places Autocomplete input component
+// Address autocomplete input, backed by the configured GeocodingProvider
+// instead of Google Places — debounces keystrokes and renders a dropdown of
+// live suggestions.
 function AddressAutocomplete({
   value,
   onChange,
@@ -32,40 +25,74 @@ function AddressAutocomplete({
   onSelect: (address: string, lat: number, lng: number) => void;
   placeholder?: string;
 }) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const autocompleteRef = useRef<any>(null);
+  const [suggestions, setSuggestions] = useState<GeocodeSuggestion[]>([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
-    if (!inputRef.current || !(window as any).google?.maps?.places) return;
-    if (autocompleteRef.current) return; // already initialized
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (containerRef.current && !containerRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handleOutsideClick);
+    return () => document.removeEventListener('mousedown', handleOutsideClick);
+  }, []);
 
-    autocompleteRef.current = new (window as any).google.maps.places.Autocomplete(
-      inputRef.current,
-      { types: ['geocode', 'establishment'] }
-    );
+  const handleInputChange = (v: string) => {
+    onChange(v);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
 
-    autocompleteRef.current.addListener('place_changed', () => {
-      const place = autocompleteRef.current.getPlace();
-      if (place?.geometry?.location) {
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        const addr = place.formatted_address || place.name || '';
-        onChange(addr);
-        onSelect(addr, lat, lng);
-      }
-    });
-  }, [onChange, onSelect]);
+    if (v.trim().length < 3) {
+      setSuggestions([]);
+      setOpen(false);
+      return;
+    }
+
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      const results = await getGeocodingProvider().autocomplete(v);
+      setLoading(false);
+      setSuggestions(results);
+      setOpen(results.length > 0);
+    }, 300);
+  };
+
+  const handlePick = (s: GeocodeSuggestion) => {
+    onChange(s.label);
+    onSelect(s.label, s.lat, s.lng);
+    setOpen(false);
+    setSuggestions([]);
+  };
 
   return (
-    <input
-      ref={inputRef}
-      type="text"
-      value={value}
-      onChange={(e) => onChange(e.target.value)}
-      placeholder={placeholder || 'Search address...'}
-      className="input"
-      autoComplete="off"
-    />
+    <div ref={containerRef} className="relative">
+      <input
+        type="text"
+        value={value}
+        onChange={(e) => handleInputChange(e.target.value)}
+        placeholder={placeholder || 'Search address...'}
+        className="input"
+        autoComplete="off"
+      />
+      {loading && (
+        <Loader2 className="w-3.5 h-3.5 text-slate-400 animate-spin absolute right-2.5 top-1/2 -translate-y-1/2" />
+      )}
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+          {suggestions.map((s, i) => (
+            <button
+              key={`${s.lat}-${s.lng}-${i}`}
+              type="button"
+              onClick={() => handlePick(s)}
+              className="w-full text-left px-3 py-2 text-xs text-slate-700 hover:bg-slate-50 transition truncate cursor-pointer"
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

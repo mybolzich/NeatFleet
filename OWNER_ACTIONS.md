@@ -21,22 +21,25 @@ All steps below are manual actions only you can complete (account creation, API 
 
 ---
 
-## Step 2 — Create Google Maps API Key
+## Step 2 — Create Map Tile + Routing/Geocoding Accounts
 
-1. Go to https://console.cloud.google.com
-2. At the top, click the project dropdown → **New Project**
-   - Name: `NeatFleet` → click **Create**
-3. Wait for the project to activate, then go to **APIs & Services → Library**
-4. Search **Maps JavaScript API** → click it → click **Enable**
-5. Search **Places API** → click it → click **Enable**
-6. Go to **APIs & Services → Credentials**
-7. Click **Create Credentials → API Key** — copy the key
-8. *(Recommended)* Click the new key to open it:
-   - Under **Application restrictions**, select **HTTP referrers (websites)**
-   - Add: `localhost:5173/*` and your Vercel URL (e.g., `neatfleet.vercel.app/*`)
-   - Click **Save**
+NeatFleet uses no Google Maps Platform APIs. Maps are OpenStreetMap-based
+(Leaflet), and directions/geocoding run through OpenRouteService — both have
+free tiers.
 
-The key you copied is your `VITE_GOOGLE_MAPS_API_KEY`.
+**Map tiles (pick one):**
+1. Go to https://www.maptiler.com/cloud/ (or https://stadiamaps.com/) → sign up free
+2. Create a map/key and copy the raster tile URL template, e.g.
+   `https://api.maptiler.com/maps/streets-v2/{z}/{x}/{y}.png?key=YOUR_KEY`
+3. This is your `VITE_MAP_TILE_URL`. Copy the attribution text your provider
+   requires (usually shown on the same page) — this is your
+   `VITE_MAP_TILE_ATTRIBUTION`.
+
+**Routing + address search:**
+1. Go to https://openrouteservice.org/dev/#/signup → sign up free
+2. Create a token — this is your `VITE_ORS_API_KEY`
+3. *(Recommended)* In the ORS dashboard, restrict the key to your domains
+   (`localhost:5173`, your Vercel URL)
 
 ---
 
@@ -61,10 +64,16 @@ The key you copied is your `VITE_GOOGLE_MAPS_API_KEY`.
    |---------------|-------|
    | `VITE_SUPABASE_URL` | from Step 1 |
    | `VITE_SUPABASE_ANON_KEY` | from Step 1 |
-   | `VITE_GOOGLE_MAPS_API_KEY` | from Step 2 |
+   | `VITE_MAP_TILE_URL` | from Step 2 |
+   | `VITE_MAP_TILE_ATTRIBUTION` | from Step 2 |
+   | `VITE_ORS_API_KEY` | from Step 2 |
    | `GEMINI_API_KEY` | from Step 3 |
 
 7. Click **Deploy** — Vercel builds and gives you a live URL (e.g., `https://neatfleet.vercel.app`)
+8. Vercel auto-detects `requirements.txt` and `api/optimize.py` and deploys the
+   OR-Tools solver as a Python serverless function — no extra setup needed.
+   If it's ever unreachable, the app automatically falls back to an in-browser
+   route-planning heuristic, so Build Routes always works either way.
 
 ---
 
@@ -107,4 +116,5 @@ If anything looks broken, open the browser DevTools (F12) → **Console** tab an
 | `SUPABASE_SERVICE_ROLE_KEY` | Vercel secrets only — never in code |
 | `GEMINI_API_KEY` | Vercel secrets only |
 | `VITE_SUPABASE_ANON_KEY` | Vercel env vars + `.env.local` (safe, public) |
-| `VITE_GOOGLE_MAPS_API_KEY` | Vercel env vars + `.env.local` (restrict to your domains) |
+| `VITE_ORS_API_KEY` | Vercel env vars + `.env.local` (restrict to your domains) |
+| `VITE_MAP_TILE_URL` | Vercel env vars + `.env.local` (often contains your tile provider key) |

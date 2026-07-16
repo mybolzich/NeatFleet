@@ -24,9 +24,17 @@ NeatFleet is a fleet routing and dispatch platform with two portals:
 | Database | Supabase PostgreSQL ← **to be implemented** |
 | Auth | Supabase Auth ← **replace Firebase/Appwrite** |
 | Authorization | Supabase Row Level Security (RLS) |
-| Maps | Google Maps Platform (`@vis.gl/react-google-maps`) |
+| Maps | Leaflet + OpenStreetMap-compatible raster tiles (no Google Maps Platform) |
+| Geocoding | OpenRouteService (address autocomplete + geocoding) |
+| Routing | OpenRouteService or OSRM (road-following directions) — swappable via `VITE_ROUTING_PROVIDER` |
+| Route optimization | Google OR-Tools VRP solver (`api/optimize.py`, Python), with an in-browser heuristic fallback |
 | AI | Google Gemini 3.5 Flash (`/api/ai-analyze`) |
-| Deployment | Vercel (target) |
+| Deployment | Vercel (target) — required for the OR-Tools Python function; GitHub Pages (static-only) falls back to the heuristic |
+
+All mapping/routing/geocoding/optimization providers sit behind adapter
+interfaces in `src/lib/providers/` (see `src/lib/providers/types.ts`) so a
+Google Maps Platform implementation can be added later without touching
+app code — swap the provider factory, not the components.
 
 ---
 
@@ -59,7 +67,12 @@ npm run dev
 ```bash
 VITE_SUPABASE_URL=https://<your-project>.supabase.co
 VITE_SUPABASE_ANON_KEY=<anon public key from Supabase > Settings > API>
-VITE_GOOGLE_MAPS_API_KEY=<your Google Maps API key>
+VITE_MAP_TILE_URL=<OSM-compatible raster tile URL template, e.g. MapTiler/Stadia — never the public OSM demo tile server>
+VITE_MAP_TILE_ATTRIBUTION=<attribution text your tile provider requires>
+VITE_ORS_API_KEY=<OpenRouteService API key — https://openrouteservice.org/dev/#/signup>
+# VITE_ORS_BASE_URL=https://api.openrouteservice.org
+# VITE_ROUTING_PROVIDER=osrm            # optional: swap routing backend to OSRM
+# VITE_OSRM_BASE_URL=<your self-hosted/managed OSRM instance — never the public demo router>
 ```
 
 ### Server-only (Vercel secrets — never in `.env.local` or code)
@@ -68,6 +81,15 @@ VITE_GOOGLE_MAPS_API_KEY=<your Google Maps API key>
 GEMINI_API_KEY=<Google Gemini API key>
 SUPABASE_SERVICE_ROLE_KEY=<service_role secret from Supabase > Settings > API>
 ```
+
+### OR-Tools VRP solver
+
+No API key required. `api/optimize.py` runs as a Vercel Python serverless
+function in production (Vercel auto-installs `requirements.txt`). For local
+dev, `server.ts` spawns `python3 api/optimize_cli.py` — install Python 3 and
+`pip install -r requirements.txt` locally to exercise it, or just leave it
+uninstalled: the frontend automatically falls back to the in-browser
+heuristic (`src/utils/optimizer.ts`) if the solver is unreachable.
 
 > ⚠️ `SUPABASE_SERVICE_ROLE_KEY` bypasses RLS. It must NEVER be used in the browser bundle. Only use it in `server.ts` for privileged server-side operations.
 

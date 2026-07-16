@@ -1,43 +1,129 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { MapPin, Navigation, Compass, ShieldAlert, CircleAlert, CloudRain, ShieldCheck, Truck } from 'lucide-react';
+import { MapContainer, TileLayer, Marker, Polyline, useMapEvents } from 'react-leaflet';
+import L from 'leaflet';
 import { Stop, Vehicle, Depot, TrafficZone } from '../types';
 import { getDistance } from '../utils/optimizer';
-import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
+import { getRoutingProvider } from '../lib/providers/routing';
+import type { LatLng } from '../lib/providers/types';
 
-// Custom Polyline rendering for @vis.gl/react-google-maps
-function RoutePolyline({
-  path,
+// User-supplied text (stop/customer/vehicle names) gets interpolated into
+// Leaflet divIcon HTML strings below, which — unlike JSX — are injected as
+// raw innerHTML with no auto-escaping. Escape it ourselves to avoid stored
+// XSS via a stop name like `<img src=x onerror=...>`.
+function escapeHtml(str: string): string {
+  return str.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+function depotDivIcon() {
+  return L.divIcon({
+    html: `
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="bg-emerald-600 border-2 border-white rounded-full shadow-lg" style="width:32px;height:32px;display:flex;align-items:center;justify-content:center;">
+          <span style="color:white;font-size:14px;">★</span>
+        </div>
+        <div class="bg-emerald-700 text-white shadow-xs" style="font-size:10px;padding:1px 6px;border-radius:4px;margin-top:2px;white-space:nowrap;font-weight:900;text-transform:uppercase;">DEPOT</div>
+      </div>`,
+    className: '',
+    iconSize: [0, 0],
+    iconAnchor: [16, 20],
+  });
+}
+
+function stopDivIcon(pinColor: string, borderColor: string, label: string, name: string) {
+  return L.divIcon({
+    html: `
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="shadow-md transition-transform" style="width:28px;height:28px;border-radius:9999px;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:900;color:white;border:2px solid ${borderColor};background:${pinColor};">${escapeHtml(label)}</div>
+        <div class="bg-slate-900/90 shadow-xs" style="color:white;font-size:10px;padding:1px 6px;border-radius:4px;margin-top:2px;white-space:nowrap;font-weight:600;">${escapeHtml(name)}</div>
+      </div>`,
+    className: '',
+    iconSize: [0, 0],
+    iconAnchor: [14, 14],
+  });
+}
+
+function vehicleDivIcon(color: string, label: string) {
+  return L.divIcon({
+    html: `
+      <div style="display:flex;flex-direction:column;align-items:center;">
+        <div class="bg-slate-900 shadow-lg" style="width:28px;height:28px;border-radius:9999px;border:2px solid ${color};display:flex;align-items:center;justify-content:center;">
+          <span style="color:white;font-size:12px;">🚚</span>
+        </div>
+        <div class="bg-slate-950/90 shadow-md" style="color:white;font-size:9px;padding:1px 6px;border-radius:4px;margin-top:2px;white-space:nowrap;font-weight:900;text-transform:uppercase;letter-spacing:0.02em;">${escapeHtml(label)}</div>
+      </div>`,
+    className: '',
+    iconSize: [0, 0],
+    iconAnchor: [14, 14],
+  });
+}
+
+function ClickToAddStop({ onAdd }: { onAdd: (lat: number, lng: number) => void }) {
+  useMapEvents({
+    click(e) {
+      onAdd(e.latlng.lat, e.latlng.lng);
+    },
+  });
+  return null;
+}
+
+// Road-following route for a vehicle's stop sequence, via the configured
+// RoutingProvider (OpenRouteService or OSRM — see src/lib/providers/routing).
+// Falls back to a straight-line path if the provider fails (no API key
+// configured, no real geocoded coordinates yet, network error) so a route
+// is always visible.
+function RoadRoute({
+  depot,
+  waypoints,
   color,
-  strokeWidth = 3,
-  opacity = 0.85,
+  isSelected,
 }: {
-  path: google.maps.LatLngLiteral[];
+  depot: LatLng;
+  waypoints: LatLng[];
   color: string;
-  strokeWidth?: number;
-  opacity?: number;
+  isSelected: boolean;
   key?: React.Key;
 }) {
-  const map = useMap();
+  const [path, setPath] = useState<LatLng[] | null>(null);
+
+  const routeKey = useMemo(
+    () => waypoints.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join('|'),
+    [waypoints]
+  );
 
   useEffect(() => {
-    if (!map || path.length < 2) return;
+    if (waypoints.length === 0) {
+      setPath(null);
+      return;
+    }
 
-    const polyline = new google.maps.Polyline({
-      path,
-      geodesic: true,
-      strokeColor: color,
-      strokeOpacity: opacity,
-      strokeWeight: strokeWidth,
-    });
+    let cancelled = false;
+    const fullRoute = [depot, ...waypoints, depot];
 
-    polyline.setMap(map);
+    getRoutingProvider()
+      .route(fullRoute)
+      .then((result) => {
+        if (cancelled) return;
+        setPath(result ? result.path : fullRoute);
+      })
+      .catch(() => {
+        if (!cancelled) setPath(fullRoute);
+      });
 
     return () => {
-      polyline.setMap(null);
+      cancelled = true;
     };
-  }, [map, path, color, strokeWidth, opacity]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [depot.lat, depot.lng, routeKey]);
 
-  return null;
+  if (!path || path.length < 2) return null;
+
+  return (
+    <Polyline
+      positions={path.map((p) => [p.lat, p.lng]) as [number, number][]}
+      pathOptions={{ color, weight: isSelected ? 4 : 2, opacity: isSelected ? 0.9 : 0.5 }}
+    />
+  );
 }
 
 interface InteractiveMapProps {
@@ -78,8 +164,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     Record<string, { x: number; y: number; statusText: string; currentStopName: string }>
   >({});
 
-  const [viewMode, setViewMode] = useState<'grid' | 'google_map'>('google_map');
-  const [mapType, setMapType] = useState<'roadmap' | 'terrain' | 'satellite' | 'hybrid'>('terrain');
+  const [viewMode, setViewMode] = useState<'grid' | 'map'>('map');
 
   // Use Tampa Bay as the default center (Cornerstone Landscape HQ area)
   const GRID_BASE_LAT = depot.lat ?? 28.1518;
@@ -107,8 +192,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     };
   };
 
-  const API_KEY = (process.env.GOOGLE_MAPS_PLATFORM_KEY as string) || '';
-  const hasValidKey = Boolean(API_KEY) && API_KEY.trim() !== '' && API_KEY !== 'YOUR_API_KEY';
+  // OSM-compatible raster tiles from a configured provider (e.g. MapTiler,
+  // Stadia Maps, Thunderforest, or a self-hosted tile server) — never the
+  // public tile.openstreetmap.org demo server, which explicitly disallows
+  // unlimited production traffic.
+  const TILE_URL = (import.meta.env.VITE_MAP_TILE_URL as string) || '';
+  const TILE_ATTRIBUTION = (import.meta.env.VITE_MAP_TILE_ATTRIBUTION as string) || '© OpenStreetMap contributors';
+  const hasValidTileConfig = Boolean(TILE_URL) && TILE_URL.trim() !== '';
 
   // Convert client cursor coords to SVG 0-100 coords
   const getSVGCoordinates = (clientX: number, clientY: number) => {
@@ -298,17 +388,13 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     setAnimatedVehicles(positions);
   }, [stops, vehicles, depot, simulationTime]);
 
-  const handleGoogleMapClick = (e: any) => {
-    if (!e.detail?.latLng) return;
-    const { lat, lng } = e.detail.latLng;
+  const handleLeafletMapClick = (lat: number, lng: number) => {
     const gridCoords = latLngToGrid(lat, lng);
     onAddStop(gridCoords.x, gridCoords.y);
   };
 
-  const handleMarkerDragEnd = (stopId: string, e: any) => {
-    if (!e.latLng) return;
-    const lat = typeof e.latLng.lat === 'function' ? e.latLng.lat() : e.latLng.lat;
-    const lng = typeof e.latLng.lng === 'function' ? e.latLng.lng() : e.latLng.lng;
+  const handleMarkerDragEnd = (stopId: string, marker: L.Marker) => {
+    const { lat, lng } = marker.getLatLng();
     const gridCoords = latLngToGrid(lat, lng);
     onUpdateStopCoordinates(stopId, gridCoords.x, gridCoords.y);
   };
@@ -320,7 +406,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
         <div>
           <h3 className="text-sm font-bold text-slate-800">Live Dispatch Planner</h3>
           <p className="text-xs text-slate-500">
-            {viewMode === 'google_map' ? 'Real-world physical terrain active' : isSimulationRunning ? 'Simulation active' : 'Drag stops to re-route • Click canvas to add orders'}
+            {viewMode === 'map' ? 'OpenStreetMap-based street map active' : isSimulationRunning ? 'Simulation active' : 'Drag stops to re-route • Click canvas to add orders'}
           </p>
         </div>
       </div>
@@ -338,15 +424,14 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           Abstract Grid
         </button>
         <button
-          onClick={() => setViewMode('google_map')}
+          onClick={() => setViewMode('map')}
           className={`px-3 py-1.5 text-[11px] font-bold rounded-lg transition cursor-pointer flex items-center gap-1 ${
-            viewMode === 'google_map'
+            viewMode === 'map'
               ? 'bg-white text-blue-600 shadow-xs'
               : 'text-slate-500 hover:text-slate-800'
           }`}
         >
-          <span>Satellite/Terrain Map</span>
-          <span className="bg-blue-100 text-blue-700 text-[9px] px-1.5 py-0.2 rounded-full font-bold">New</span>
+          <span>Street Map</span>
         </button>
       </div>
 
@@ -360,18 +445,8 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             Grid Cursor: <span className="text-slate-800 font-mono font-semibold">{cursorPos ? `X:${Math.round(cursorPos.x)} Y:${Math.round(cursorPos.y)}` : '0, 0'}</span>
           </div>
         ) : (
-          <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-full shadow-xs">
-            <span className="text-slate-500 font-semibold">Style:</span>
-            <select
-              value={mapType}
-              onChange={(e: any) => setMapType(e.target.value)}
-              className="text-slate-800 font-bold focus:outline-none bg-transparent cursor-pointer font-sans"
-            >
-              <option value="terrain">Terrain Map</option>
-              <option value="satellite">Satellite View</option>
-              <option value="hybrid">Hybrid View</option>
-              <option value="roadmap">Standard Street</option>
-            </select>
+          <div className="flex items-center gap-1.5 bg-white border border-slate-200 px-2.5 py-1 rounded-full shadow-xs text-slate-500 font-semibold">
+            {TILE_ATTRIBUTION}
           </div>
         )}
       </div>
@@ -416,7 +491,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
     </div>
   );
 
-  if (viewMode === 'google_map' && !hasValidKey) {
+  if (viewMode === 'map' && !hasValidTileConfig) {
     return (
       <div className="relative flex flex-col h-full bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-xs">
         {renderTopBar()}
@@ -426,35 +501,34 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
             <div className="w-12 h-12 bg-blue-50 rounded-2xl border border-blue-200 flex items-center justify-center text-blue-600 mx-auto mb-4">
               <Compass className="w-6 h-6 animate-spin-slow" />
             </div>
-            <h3 className="text-base font-extrabold text-slate-900 mb-2">Google Maps Terrain Integration</h3>
+            <h3 className="text-base font-extrabold text-slate-900 mb-2">OpenStreetMap Tile Provider Needed</h3>
             <p className="text-xs text-slate-500 mb-6 leading-relaxed">
-              Unlock real-world physical terrain, high-resolution satellite imagery, and live topographic contours mapped directly to your dispatch grid!
+              This map renders OSM-compatible tiles from a provider you configure — never the public
+              tile.openstreetmap.org demo server, which isn't licensed for unlimited production traffic.
             </p>
 
             <div className="text-left space-y-4 mb-6 text-xs bg-slate-50 p-4 rounded-xl border border-slate-200">
-              <p className="font-bold text-slate-800">To enable real Google Maps:</p>
+              <p className="font-bold text-slate-800">To enable the street map:</p>
               <ol className="list-decimal list-inside space-y-2.5 text-slate-600 font-sans">
                 <li>
-                  <a
-                    href="https://console.cloud.google.com/google/maps-apis/start?utm_campaign=gmp-code-assist-ais"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-blue-600 hover:underline font-bold inline-flex items-center gap-1"
-                  >
-                    Click here to get an API Key
-                  </a>
+                  Sign up for a tile provider — e.g.{' '}
+                  <a href="https://www.maptiler.com/cloud/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">
+                    MapTiler
+                  </a>{' '}
+                  or{' '}
+                  <a href="https://stadiamaps.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline font-bold">
+                    Stadia Maps
+                  </a>{' '}
+                  (both have free tiers), or self-host a tile server.
                 </li>
                 <li>
-                  Open <strong>Settings</strong> (⚙️ gear icon in the top-right corner of AI Studio)
+                  Copy the raster XYZ tile URL template (e.g. <code className="bg-slate-200 px-1 rounded">.../&#123;z&#125;/&#123;x&#125;/&#123;y&#125;.png?key=...</code>)
                 </li>
                 <li>
-                  Select <strong>Secrets</strong> from the left menu
+                  Set <code className="bg-slate-200 text-slate-800 px-1 py-0.5 rounded font-mono font-bold text-[11px]">VITE_MAP_TILE_URL</code> in <code className="bg-slate-200 px-1 rounded">.env.local</code>
                 </li>
                 <li>
-                  Add a secret named <code className="bg-slate-200 text-slate-800 px-1 py-0.5 rounded font-mono font-bold text-[11px]">GOOGLE_MAPS_PLATFORM_KEY</code>
-                </li>
-                <li>
-                  Paste your API key value and press <strong>Enter</strong> to save
+                  Optionally set <code className="bg-slate-200 text-slate-800 px-1 py-0.5 rounded font-mono font-bold text-[11px]">VITE_MAP_TILE_ATTRIBUTION</code> to match your provider's required attribution text
                 </li>
               </ol>
             </div>
@@ -736,38 +810,20 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </>
         ) : (
           <div className="w-full h-full relative">
-            <APIProvider apiKey={API_KEY} version="weekly">
-            <Map
-              defaultCenter={gridToLatLng(depot.x, depot.y)}
-              defaultZoom={12}
-              mapTypeId={mapType}
-              onClick={handleGoogleMapClick}
-              mapId="DEMO_MAP_ID"
-              internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
+            <MapContainer
+              center={[gridToLatLng(depot.x, depot.y).lat, gridToLatLng(depot.x, depot.y).lng]}
+              zoom={12}
               style={{ width: '100%', height: '100%' }}
-              options={{
-                disableDefaultUI: false,
-                zoomControl: true,
-                mapTypeControl: false,
-                streetViewControl: false,
-                fullscreenControl: false,
-              }}
+              zoomControl={true}
             >
+              <TileLayer url={TILE_URL} attribution={TILE_ATTRIBUTION} />
+              <ClickToAddStop onAdd={handleLeafletMapClick} />
+
               {/* Depot Marker */}
-              <AdvancedMarker position={gridToLatLng(depot.x, depot.y)} title="Central Depot">
-                <div style={{ transform: 'translate(-50%, -50%)' }} className="flex flex-col items-center">
-                  <div className="bg-emerald-600 border-2 border-white rounded-full p-2 shadow-lg flex items-center justify-center">
-                    <polygon
-                      points="0,-3.5 1.1,-1.1 3.5,-1.1 1.6,0.6 2.3,3 0,1.5 -2.3,3 -1.6,0.6 -3.5,-1.1 -1.1,-1.1"
-                      className="fill-white stroke-none"
-                      transform="scale(0.8)"
-                    />
-                  </div>
-                  <div className="bg-emerald-700 text-[10px] text-white px-2 py-0.5 rounded font-black font-mono mt-1 whitespace-nowrap shadow-xs uppercase">
-                    DEPOT
-                  </div>
-                </div>
-              </AdvancedMarker>
+              <Marker
+                position={[gridToLatLng(depot.x, depot.y).lat, gridToLatLng(depot.x, depot.y).lng]}
+                icon={depotDivIcon()}
+              />
 
               {/* Stop Markers */}
               {stops.map((stop) => {
@@ -775,49 +831,22 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 const isSelected = selectedStopId === stop.id;
                 const assignedVehicle = stop.assignedVehicleId ? vehicles.find((v) => v.id === stop.assignedVehicleId) : null;
                 const pinColor = assignedVehicle ? assignedVehicle.color : '#94a3b8';
-                const hasViolation = stop.eta !== null && stop.eta > stop.timeWindowEnd;
+                const borderColor = isSelected ? '#ffffff' : '#475569';
+                const label = stop.stopSequence !== null ? String(stop.stopSequence + 1) : '•';
 
                 return (
-                  <AdvancedMarker
+                  <Marker
                     key={stop.id}
-                    position={latLng}
-                    draggable={true}
-                    onDragEnd={(e) => handleMarkerDragEnd(stop.id, e)}
-                    onClick={() => onSelectStop(selectedStopId === stop.id ? null : stop.id)}
-                  >
-                    <div
-                      onMouseEnter={() => setHoveredStop(stop)}
-                      onMouseLeave={() => setHoveredStop(null)}
-                      className="relative group cursor-pointer flex flex-col items-center"
-                      style={{ transform: 'translate(-50%, -100%)' }}
-                    >
-                      {/* Highlight Ring */}
-                      {isSelected && (
-                        <div className="absolute -top-1 w-8 h-8 rounded-full border-4 border-blue-500/80 animate-pulse" />
-                      )}
-
-                      {/* Ping animation for active delayed stops */}
-                      {hasViolation && (
-                        <div className="absolute top-1 w-6 h-6 rounded-full border-2 border-red-500 animate-ping pointer-events-none" />
-                      )}
-
-                      {/* Pin Container */}
-                      <div
-                        className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-black text-white shadow-md border-2 transition-transform hover:scale-110"
-                        style={{
-                          backgroundColor: pinColor,
-                          borderColor: isSelected ? '#ffffff' : '#475569',
-                        }}
-                      >
-                        {stop.stopSequence !== null ? stop.stopSequence + 1 : '•'}
-                      </div>
-
-                      {/* Name Label */}
-                      <div className="bg-slate-900/90 text-[10px] text-white px-1.5 py-0.5 rounded shadow-xs mt-1 font-semibold whitespace-nowrap opacity-75 group-hover:opacity-100 transition-opacity">
-                        {stop.name}
-                      </div>
-                    </div>
-                  </AdvancedMarker>
+                    position={[latLng.lat, latLng.lng]}
+                    draggable
+                    icon={stopDivIcon(pinColor, borderColor, label, stop.name)}
+                    eventHandlers={{
+                      click: () => onSelectStop(selectedStopId === stop.id ? null : stop.id),
+                      mouseover: () => setHoveredStop(stop),
+                      mouseout: () => setHoveredStop(null),
+                      dragend: (e) => handleMarkerDragEnd(stop.id, e.target as L.Marker),
+                    }}
+                  />
                 );
               })}
 
@@ -828,40 +857,20 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 const latLng = gridToLatLng(anim.x, anim.y);
 
                 return (
-                  <AdvancedMarker
+                  <Marker
                     key={vehicle.id}
-                    position={latLng}
-                    title={`${vehicle.name} - ${anim.statusText}`}
-                  >
-                    <div
-                      onMouseEnter={() => setHoveredVehicle(vehicle)}
-                      onMouseLeave={() => setHoveredVehicle(null)}
-                      onClick={() => onSelectVehicle(selectedVehicleId === vehicle.id ? null : vehicle.id)}
-                      className="relative group cursor-pointer flex flex-col items-center"
-                      style={{ transform: 'translate(-50%, -50%)' }}
-                    >
-                      {/* Highlight Ring */}
-                      {selectedVehicleId === vehicle.id && (
-                        <div className="absolute w-10 h-10 rounded-full border-4 border-blue-400/80 animate-ping pointer-events-none" />
-                      )}
-
-                      {/* Custom Vehicle Pin */}
-                      <div
-                        className="bg-slate-900 border-2 rounded-full p-2 shadow-lg flex items-center justify-center transition-all hover:scale-110"
-                        style={{ borderColor: vehicle.color }}
-                      >
-                        <Truck className="w-4 h-4 text-white" />
-                      </div>
-
-                      <div className="bg-slate-950/90 text-[9px] text-white px-2 py-0.5 rounded font-black font-mono mt-1 whitespace-nowrap shadow-md uppercase tracking-wide">
-                        {vehicle.name.split(' ')[0]}
-                      </div>
-                    </div>
-                  </AdvancedMarker>
+                    position={[latLng.lat, latLng.lng]}
+                    icon={vehicleDivIcon(vehicle.color, vehicle.name.split(' ')[0])}
+                    eventHandlers={{
+                      click: () => onSelectVehicle(selectedVehicleId === vehicle.id ? null : vehicle.id),
+                      mouseover: () => setHoveredVehicle(vehicle),
+                      mouseout: () => setHoveredVehicle(null),
+                    }}
+                  />
                 );
               })}
 
-              {/* Polylines for each vehicle route */}
+              {/* Road-following routes for each vehicle */}
               {vehicles.map((vehicle) => {
                 const assignedStops = stops
                   .filter((s) => s.assignedVehicleId === vehicle.id)
@@ -869,37 +878,30 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
                 if (assignedStops.length === 0) return null;
 
-                const pathPoints = [
-                  gridToLatLng(depot.x, depot.y),
-                  ...assignedStops.map((s) => stopToLatLng(s)),
-                  gridToLatLng(depot.x, depot.y),
-                ];
-
                 const isSelected = selectedVehicleId === vehicle.id;
 
                 return (
-                  <RoutePolyline
+                  <RoadRoute
                     key={vehicle.id}
-                    path={pathPoints}
+                    depot={gridToLatLng(depot.x, depot.y)}
+                    waypoints={assignedStops.map((s) => stopToLatLng(s))}
                     color={vehicle.color}
-                    strokeWidth={isSelected ? 4 : 2}
-                    opacity={isSelected ? 0.9 : 0.5}
+                    isSelected={isSelected}
                   />
                 );
               })}
-            </Map>
-          </APIProvider>
+            </MapContainer>
 
-          {renderLegend()}
-        </div>
-      )}
+            {renderLegend()}
+          </div>
+        )}
       </div>
 
       {/* Hover Tooltips Panel */}
       {hoveredStop && (
         <div
           className={`absolute z-20 bg-white/95 backdrop-blur-md border border-slate-200 p-4 rounded-xl shadow-lg text-xs text-slate-700 pointer-events-none ${
-            viewMode === 'google_map' ? 'bottom-24 right-4 w-72' : ''
+            viewMode === 'map' ? 'bottom-24 right-4 w-72' : ''
           }`}
           style={viewMode === 'grid' ? {
             left: `${Math.min(80, Math.max(2, hoveredStop.x))}%`,
@@ -957,7 +959,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
       {hoveredVehicle && (
         <div
           className={`absolute z-20 bg-white border border-slate-200 p-4 rounded-xl shadow-lg text-xs text-slate-600 pointer-events-none ${
-            viewMode === 'google_map' ? 'bottom-24 right-4 w-72' : ''
+            viewMode === 'map' ? 'bottom-24 right-4 w-72' : ''
           }`}
           style={viewMode === 'grid' ? {
             left: `${Math.min(80, Math.max(2, animatedVehicles[hoveredVehicle.id]?.x ?? 50))}%`,
