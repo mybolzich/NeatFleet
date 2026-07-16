@@ -36,24 +36,41 @@ function AddressAutocomplete({
   const autocompleteRef = useRef<any>(null);
 
   useEffect(() => {
-    if (!inputRef.current || !(window as any).google?.maps?.places) return;
     if (autocompleteRef.current) return; // already initialized
 
-    autocompleteRef.current = new (window as any).google.maps.places.Autocomplete(
-      inputRef.current,
-      { types: ['geocode', 'establishment'] }
-    );
-
-    autocompleteRef.current.addListener('place_changed', () => {
-      const place = autocompleteRef.current.getPlace();
-      if (place?.geometry?.location) {
-        const lat = place.geometry.location.lat();
-        const lng = place.geometry.location.lng();
-        const addr = place.formatted_address || place.name || '';
-        onChange(addr);
-        onSelect(addr, lat, lng);
+    // The Google Maps script (with the Places library) loads asynchronously
+    // and may not be ready yet when this component first mounts — poll until
+    // it is, rather than checking once and silently giving up.
+    const tryInit = () => {
+      if (autocompleteRef.current || !inputRef.current || !(window as any).google?.maps?.places) {
+        return false;
       }
-    });
+
+      autocompleteRef.current = new (window as any).google.maps.places.Autocomplete(
+        inputRef.current,
+        { types: ['geocode', 'establishment'] }
+      );
+
+      autocompleteRef.current.addListener('place_changed', () => {
+        const place = autocompleteRef.current.getPlace();
+        if (place?.geometry?.location) {
+          const lat = place.geometry.location.lat();
+          const lng = place.geometry.location.lng();
+          const addr = place.formatted_address || place.name || '';
+          onChange(addr);
+          onSelect(addr, lat, lng);
+        }
+      });
+      return true;
+    };
+
+    if (tryInit()) return;
+
+    const interval = setInterval(() => {
+      if (tryInit()) clearInterval(interval);
+    }, 300);
+
+    return () => clearInterval(interval);
   }, [onChange, onSelect]);
 
   return (

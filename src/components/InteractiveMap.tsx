@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { MapPin, Navigation, Compass, ShieldAlert, CircleAlert, CloudRain, ShieldCheck, Truck } from 'lucide-react';
 import { Stop, Vehicle, Depot, TrafficZone } from '../types';
 import { getDistance } from '../utils/optimizer';
@@ -38,6 +38,82 @@ function RoutePolyline({
   }, [map, path, color, strokeWidth, opacity]);
 
   return null;
+}
+
+// Road-following route for a vehicle's stop sequence, using the Directions
+// API (depot → stops in sequence → depot). Falls back to a straight-line
+// path if Directions fails (e.g. no real geocoded coordinates yet, or the
+// Directions API isn't enabled on the key) so a route is always visible.
+function RoadRoute({
+  depot,
+  waypoints,
+  color,
+  isSelected,
+}: {
+  depot: google.maps.LatLngLiteral;
+  waypoints: google.maps.LatLngLiteral[];
+  color: string;
+  isSelected: boolean;
+  key?: React.Key;
+}) {
+  const map = useMap();
+  const [path, setPath] = useState<google.maps.LatLngLiteral[] | null>(null);
+
+  const routeKey = useMemo(
+    () => waypoints.map((p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`).join('|'),
+    [waypoints]
+  );
+
+  useEffect(() => {
+    if (!map || waypoints.length === 0) {
+      setPath(null);
+      return;
+    }
+    if (!(window as any).google?.maps?.DirectionsService) {
+      setPath([depot, ...waypoints, depot]);
+      return;
+    }
+
+    let cancelled = false;
+    const directionsService = new google.maps.DirectionsService();
+
+    directionsService.route(
+      {
+        origin: depot,
+        destination: depot,
+        waypoints: waypoints.map((location) => ({ location, stopover: true })),
+        optimizeWaypoints: false,
+        travelMode: google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (cancelled) return;
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          const routePath = result.routes[0].overview_path.map((p) => ({ lat: p.lat(), lng: p.lng() }));
+          setPath(routePath);
+        } else {
+          // Directions failed (quota, API not enabled, unroutable points) —
+          // still show something rather than nothing.
+          setPath([depot, ...waypoints, depot]);
+        }
+      }
+    );
+
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, depot.lat, depot.lng, routeKey]);
+
+  if (!path) return null;
+
+  return (
+    <RoutePolyline
+      path={path}
+      color={color}
+      strokeWidth={isSelected ? 4 : 2}
+      opacity={isSelected ? 0.9 : 0.5}
+    />
+  );
 }
 
 interface InteractiveMapProps {
@@ -736,7 +812,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
           </>
         ) : (
           <div className="w-full h-full relative">
-            <APIProvider apiKey={API_KEY} version="weekly">
+            <APIProvider apiKey={API_KEY} version="weekly" libraries={['places']}>
             <Map
               defaultCenter={gridToLatLng(depot.x, depot.y)}
               defaultZoom={12}
@@ -861,7 +937,7 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
                 );
               })}
 
-              {/* Polylines for each vehicle route */}
+              {/* Road-following routes for each vehicle */}
               {vehicles.map((vehicle) => {
                 const assignedStops = stops
                   .filter((s) => s.assignedVehicleId === vehicle.id)
@@ -869,21 +945,15 @@ export const InteractiveMap: React.FC<InteractiveMapProps> = ({
 
                 if (assignedStops.length === 0) return null;
 
-                const pathPoints = [
-                  gridToLatLng(depot.x, depot.y),
-                  ...assignedStops.map((s) => stopToLatLng(s)),
-                  gridToLatLng(depot.x, depot.y),
-                ];
-
                 const isSelected = selectedVehicleId === vehicle.id;
 
                 return (
-                  <RoutePolyline
+                  <RoadRoute
                     key={vehicle.id}
-                    path={pathPoints}
+                    depot={gridToLatLng(depot.x, depot.y)}
+                    waypoints={assignedStops.map((s) => stopToLatLng(s))}
                     color={vehicle.color}
-                    strokeWidth={isSelected ? 4 : 2}
-                    opacity={isSelected ? 0.9 : 0.5}
+                    isSelected={isSelected}
                   />
                 );
               })}

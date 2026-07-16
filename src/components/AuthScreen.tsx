@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { Truck, Loader2 } from 'lucide-react';
 import { useAuth } from '../lib/useAuth';
 
@@ -201,7 +201,7 @@ export function AuthScreen({ auth }: AuthScreenProps) {
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
     <div>
       <div className="label-sm" style={{ marginBottom: 6 }}>{label}</div>

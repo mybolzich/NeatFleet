@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import { Stop, Vehicle, Depot, TrafficZone, OptimizerConfig } from './types';
 import { optimizeRoutes } from './utils/optimizer';
+import { generatePreset } from './utils/presets';
+import type { PresetKey } from './utils/presets';
 import { InteractiveMap } from './components/InteractiveMap';
 import { OrderBook } from './components/OrderBook';
 import { FleetManager } from './components/FleetManager';
@@ -109,6 +111,16 @@ export default function App() {
     await clearAllOrders();
     setRouteStatus('unbuilt');
   }, [clearAllOrders]);
+
+  const handleLoadPreset = useCallback(async (key: string) => {
+    await clearAllOrders();
+    const presetStops = generatePreset(key as PresetKey);
+    for (const s of presetStops) {
+      await addOrder(s);
+    }
+    await clearPlans();
+    setRouteStatus('unbuilt');
+  }, [clearAllOrders, addOrder, clearPlans]);
 
   const handleMapClickAdd = useCallback(async (x: number, y: number) => {
     const stop = await addOrder({
@@ -461,7 +473,7 @@ export default function App() {
                 stops={stops}
                 onAddStop={handleAddStop}
                 onDeleteStop={handleDeleteStop}
-                onLoadPreset={() => {}}
+                onLoadPreset={handleLoadPreset}
                 selectedStopId={selectedStopId}
                 onSelectStop={setSelectedStopId}
                 onClearAllStops={handleClearAllStops}
