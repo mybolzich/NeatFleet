@@ -123,6 +123,23 @@ export function useRoutePlans(companyId: string | null, serviceDate: string) {
     [companyId, serviceDate]
   );
 
+  // Mark a single vehicle's plan as dispatched
+  const dispatchVehicle = useCallback(async (vehicleId: string): Promise<boolean> => {
+    if (!companyId) return false;
+    const { error } = await supabase
+      .from('route_plans')
+      .update({ status: 'dispatched', dispatched_at: new Date().toISOString() })
+      .eq('company_id', companyId)
+      .eq('vehicle_id', vehicleId)
+      .eq('service_date', serviceDate)
+      .eq('status', 'built');
+    if (error) {
+      console.error('[useRoutePlans] dispatchVehicle error:', error);
+      return false;
+    }
+    return true;
+  }, [companyId, serviceDate]);
+
   // Mark all today's plans as dispatched
   const dispatchPlans = useCallback(async (): Promise<boolean> => {
     if (!companyId) return false;
@@ -160,5 +177,5 @@ export function useRoutePlans(companyId: string | null, serviceDate: string) {
     return true;
   }, [companyId, serviceDate]);
 
-  return { routePlans, loading, buildPlans, dispatchPlans, clearPlans };
+  return { routePlans, loading, buildPlans, dispatchVehicle, dispatchPlans, clearPlans };
 }

@@ -189,3 +189,28 @@ CREATE POLICY "route_plans_all"
 
 CREATE INDEX IF NOT EXISTS route_plans_company_date_idx
   ON route_plans (company_id, service_date);
+
+-- ── dispatch_events ───────────────────────────────────────────────────────
+-- Audit trail: route dispatched, stop completed, route completed.
+
+CREATE TABLE IF NOT EXISTS dispatch_events (
+  id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  company_id    uuid NOT NULL REFERENCES companies ON DELETE CASCADE,
+  route_plan_id uuid REFERENCES route_plans ON DELETE SET NULL,
+  vehicle_id    uuid REFERENCES vehicles   ON DELETE SET NULL,
+  stop_id       uuid REFERENCES stops      ON DELETE SET NULL,
+  event_type    text NOT NULL
+                CHECK (event_type IN ('route_dispatched', 'stop_completed', 'route_completed')),
+  created_at    timestamptz NOT NULL DEFAULT now()
+);
+
+ALTER TABLE dispatch_events ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "dispatch_events_all"
+  ON dispatch_events FOR ALL
+  TO authenticated
+  USING (company_id = my_company_id())
+  WITH CHECK (company_id = my_company_id());
+
+CREATE INDEX IF NOT EXISTS dispatch_events_company_created_idx
+  ON dispatch_events (company_id, created_at DESC);

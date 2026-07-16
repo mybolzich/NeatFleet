@@ -17,6 +17,8 @@ import { useAuth } from './lib/useAuth';
 import { useVehicles } from './lib/hooks/useVehicles';
 import { useOrders } from './lib/hooks/useOrders';
 import { useRoutePlans } from './lib/hooks/useRoutePlans';
+import type { RoutePlan } from './lib/hooks/useRoutePlans';
+import { useDispatchEvents } from './lib/hooks/useDispatchEvents';
 
 // ── Constants ─────────────────────────────────────────────────────────────
 const CENTRAL_DEPOT: Depot = {
@@ -70,7 +72,9 @@ export default function App() {
   const [serviceDate, setServiceDate] = useState<string>(new Date().toISOString().split('T')[0]);
   const [building, setBuilding]     = useState(false);
 
-  const { routePlans, buildPlans, dispatchPlans, clearPlans } = useRoutePlans(companyId, serviceDate);
+  const { routePlans, buildPlans, dispatchVehicle, dispatchPlans, clearPlans } = useRoutePlans(companyId, serviceDate);
+  const { logEvent } = useDispatchEvents(companyId);
+  const [busyVehicleId, setBusyVehicleId] = useState<string | null>(null);
 
   // Restore route status from persisted plans after initial data load
   const routeStatusInitialized = useRef(false);
@@ -182,6 +186,62 @@ export default function App() {
     ]);
   }, [routeStatus, vehicles, stops, updateVehicle, updateOrder, dispatchPlans]);
 
+  // ── Dispatch single vehicle ──────────────────────────────────────────────
+  const handleDispatchVehicle = useCallback(async (vehicleId: string) => {
+    if (busyVehicleId) return;
+    setBusyVehicleId(vehicleId);
+
+    const plan = routePlans.find(p => p.vehicleId === vehicleId);
+    const vehicleStops = stops.filter(s => s.assignedVehicleId === vehicleId);
+
+    await Promise.all([
+      dispatchVehicle(vehicleId),
+      updateVehicle(vehicleId, { status: 'Active' }),
+      ...vehicleStops.map(s => updateOrder(s.id, { status: 'In Transit' })),
+      logEvent({ vehicleId, routePlanId: plan?.id, eventType: 'route_dispatched' }),
+    ]);
+
+    // Transition to global dispatched when all active vehicles are dispatched
+    const activeVehicleIds = new Set(stops.filter(s => s.assignedVehicleId).map(s => s.assignedVehicleId!));
+    const alreadyDispatched = new Set([
+      ...routePlans.filter(p => p.status === 'dispatched').map(p => p.vehicleId),
+      vehicleId,
+    ]);
+    if ([...activeVehicleIds].every(vid => alreadyDispatched.has(vid))) {
+      setRouteStatus('dispatched');
+    }
+
+    setBusyVehicleId(null);
+  }, [busyVehicleId, routePlans, stops, dispatchVehicle, updateVehicle, updateOrder, logEvent]);
+
+  // ── Mark stop completed (Live Ops) ────────────────────────────────────────
+  const handleMarkCompleted = useCallback(async (stopId: string) => {
+    const stop = stops.find(s => s.id === stopId);
+    if (!stop || stop.status === 'Completed') return;
+
+    await Promise.all([
+      updateOrder(stopId, { status: 'Completed' }),
+      logEvent({
+        stopId,
+        vehicleId: stop.assignedVehicleId ?? undefined,
+        eventType: 'stop_completed',
+      }),
+    ]);
+
+    // If all stops for this vehicle are now complete, log route_completed + set Returning
+    if (stop.assignedVehicleId) {
+      const vehicleStops = stops.filter(s => s.assignedVehicleId === stop.assignedVehicleId);
+      const allDone = vehicleStops.every(s => s.id === stopId || s.status === 'Completed');
+      if (allDone) {
+        const plan = routePlans.find(p => p.vehicleId === stop.assignedVehicleId);
+        await Promise.all([
+          updateVehicle(stop.assignedVehicleId, { status: 'Returning' }),
+          logEvent({ vehicleId: stop.assignedVehicleId, routePlanId: plan?.id, eventType: 'route_completed' }),
+        ]);
+      }
+    }
+  }, [stops, routePlans, updateOrder, updateVehicle, logEvent]);
+
   // ── Reset ─────────────────────────────────────────────────────────────────
   const handleReset = useCallback(async () => {
     await Promise.all([
@@ -234,6 +294,7 @@ export default function App() {
   // ── Summary stats ─────────────────────────────────────────────────────────
   const assignedCount = stops.filter(s => s.assignedVehicleId).length;
   const unassignedCount = stops.length - assignedCount;
+  const completedCount = stops.filter(s => s.status === 'Completed').length;
   const activeCrews = vehicles.filter(v => stops.some(s => s.assignedVehicleId === v.id)).length;
 
   // ── Auth guard ────────────────────────────────────────────────────────────
@@ -293,13 +354,18 @@ export default function App() {
 
         {/* KPI strip */}
         <div className="hidden md:flex items-center gap-4">
-          <Kpi icon={<MapPin className="w-3.5 h-3.5 text-blue-500" />}
-            label="Stops" value={`${assignedCount} / ${stops.length}`} sub="assigned" />
-          <Kpi icon={<Truck className="w-3.5 h-3.5 text-emerald-500" />}
-            label="Crew" value={`${activeCrews} / ${vehicles.length}`} sub="active" />
+          <Kpi icon={<Package className="w-3.5 h-3.5 text-blue-500" />}
+            label="Orders" value={String(stops.length)} sub="total" />
           <Kpi icon={<AlertTriangle className="w-3.5 h-3.5 text-amber-500" />}
             label="Unassigned" value={String(unassignedCount)} sub="stops"
             alert={unassignedCount > 0} />
+          <Kpi icon={<Truck className="w-3.5 h-3.5 text-slate-400" />}
+            label="Crew" value={`${activeCrews} / ${vehicles.length}`} sub="active" />
+          {routeStatus !== 'unbuilt' && (
+            <Kpi icon={<CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />}
+              label="Completed" value={`${completedCount} / ${assignedCount}`} sub="stops"
+              success={completedCount > 0} />
+          )}
         </div>
 
         {/* Action buttons */}
@@ -313,16 +379,10 @@ export default function App() {
             </button>
           )}
           {routeStatus === 'built' && (
-            <>
-              <button onClick={handleReset}
-                className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer">
-                <RotateCcw className="w-3.5 h-3.5" /> Rebuild
-              </button>
-              <button onClick={handleDispatch}
-                className="flex items-center gap-2 px-4 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition shadow-sm cursor-pointer">
-                <Send className="w-3.5 h-3.5" /> Dispatch All
-              </button>
-            </>
+            <button onClick={handleReset}
+              className="flex items-center gap-2 px-3 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer">
+              <RotateCcw className="w-3.5 h-3.5" /> Rebuild
+            </button>
           )}
           {routeStatus === 'dispatched' && (
             <>
@@ -397,6 +457,7 @@ export default function App() {
                 stops={stops}
                 vehicles={vehicles}
                 routeStatus={routeStatus}
+                routePlans={routePlans}
                 expandedCrews={expandedCrews}
                 onToggleCrew={(id) => setExpandedCrews(prev => {
                   const next = new Set(prev);
@@ -411,6 +472,10 @@ export default function App() {
                 onDropOnVehicle={handleDropOnVehicle}
                 onBuildRoutes={handleBuildRoutes}
                 building={building}
+                onDispatchVehicle={handleDispatchVehicle}
+                onDispatchAll={handleDispatch}
+                onMarkCompleted={handleMarkCompleted}
+                busyVehicleId={busyVehicleId}
               />
             )}
 
@@ -473,12 +538,12 @@ export default function App() {
 
 // ── Sub-components ────────────────────────────────────────────────────────
 
-function Kpi({ icon, label, value, sub, alert }: { icon: React.ReactNode; label: string; value: string; sub: string; alert?: boolean }) {
+function Kpi({ icon, label, value, sub, alert, success }: { icon: React.ReactNode; label: string; value: string; sub: string; alert?: boolean; success?: boolean }) {
   return (
-    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${alert ? 'bg-amber-50 border-amber-200' : 'bg-slate-50 border-slate-200'}`}>
+    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border ${alert ? 'bg-amber-50 border-amber-200' : success ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
       {icon}
       <div>
-        <div className={`text-xs font-bold ${alert ? 'text-amber-700' : 'text-slate-800'}`}>{value}</div>
+        <div className={`text-xs font-bold ${alert ? 'text-amber-700' : success ? 'text-emerald-700' : 'text-slate-800'}`}>{value}</div>
         <div className="text-[9px] text-slate-400 uppercase font-bold tracking-wide">{sub}</div>
       </div>
     </div>
@@ -508,6 +573,7 @@ interface RoutesPanelProps {
   stops: Stop[];
   vehicles: Vehicle[];
   routeStatus: RouteStatus;
+  routePlans: RoutePlan[];
   expandedCrews: Set<string>;
   onToggleCrew: (id: string) => void;
   selectedStopId: string | null;
@@ -518,37 +584,54 @@ interface RoutesPanelProps {
   onDropOnVehicle: (vehicleId: string) => void;
   onBuildRoutes: () => void;
   building: boolean;
+  onDispatchVehicle: (vehicleId: string) => void;
+  onDispatchAll: () => void;
+  onMarkCompleted: (stopId: string) => void;
+  busyVehicleId: string | null;
 }
 
 function RoutesPanel({
-  stops, vehicles, routeStatus, expandedCrews, onToggleCrew,
+  stops, vehicles, routeStatus, routePlans, expandedCrews, onToggleCrew,
   selectedStopId, onSelectStop, onSelectVehicle,
-  onDeleteStop, onDragStart, onDropOnVehicle, onBuildRoutes, building
+  onDeleteStop, onDragStart, onDropOnVehicle, onBuildRoutes, building,
+  onDispatchVehicle, onDispatchAll, onMarkCompleted, busyVehicleId,
 }: RoutesPanelProps) {
 
   const unassigned = stops.filter(s => !s.assignedVehicleId);
   const [dragOver, setDragOver] = useState<string | null>(null);
 
+  const undispatchedActiveVehicles = vehicles.filter(v =>
+    stops.some(s => s.assignedVehicleId === v.id) &&
+    (routePlans.find(p => p.vehicleId === v.id)?.status ?? 'built') === 'built'
+  );
+
   return (
     <div className="flex flex-col h-full overflow-hidden">
-      {/* Header */}
+      {/* Panel header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-100">
         <h2 className="text-sm font-bold text-slate-800">Route Plan</h2>
-        {routeStatus === 'unbuilt' ? (
+        {routeStatus === 'unbuilt' && (
           <button onClick={onBuildRoutes} disabled={stops.length === 0 || building}
             className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white rounded-lg transition cursor-pointer">
             {building ? 'Building...' : <><Play className="w-3 h-3" /> Build</>}
           </button>
-        ) : (
-          <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${routeStatus === 'dispatched' ? 'bg-emerald-100 text-emerald-700' : 'bg-blue-100 text-blue-700'}`}>
-            {routeStatus === 'dispatched' ? '✓ Dispatched' : 'Built'}
+        )}
+        {routeStatus === 'built' && undispatchedActiveVehicles.length > 0 && (
+          <button onClick={onDispatchAll}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition cursor-pointer">
+            <Send className="w-3 h-3" /> Dispatch All
+          </button>
+        )}
+        {routeStatus === 'dispatched' && (
+          <span className="text-[10px] font-bold px-2 py-1 rounded-full bg-emerald-100 text-emerald-700">
+            ✓ All Dispatched
           </span>
         )}
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {/* Unassigned stops */}
-        {unassigned.length > 0 && (
+        {/* Unassigned stops — hidden once fully dispatched */}
+        {unassigned.length > 0 && routeStatus !== 'dispatched' && (
           <div className="border-b border-slate-100 bg-amber-50/50">
             <div className="flex items-center gap-2 px-4 py-2">
               <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
@@ -565,34 +648,68 @@ function RoutesPanel({
           </div>
         )}
 
-        {/* Per-crew route sections */}
+        {/* Per-vehicle route sections */}
         {vehicles.map(v => {
           const crewStops = stops
             .filter(s => s.assignedVehicleId === v.id)
             .sort((a, b) => (a.stopSequence ?? 0) - (b.stopSequence ?? 0));
+          const plan = routePlans.find(p => p.vehicleId === v.id);
+          const isDispatched = plan?.status === 'dispatched' || plan?.status === 'active' || plan?.status === 'completed';
           const expanded = expandedCrews.has(v.id);
-          const totalMins = v.metrics.totalTime;
+          const completedStops = crewStops.filter(s => s.status === 'Completed').length;
           const isDragTarget = dragOver === v.id;
 
           return (
             <div key={v.id}
               className={`border-b border-slate-100 transition ${isDragTarget ? 'bg-blue-50' : ''}`}
-              onDragOver={(e) => { e.preventDefault(); setDragOver(v.id); }}
-              onDragLeave={() => setDragOver(null)}
-              onDrop={() => { setDragOver(null); onDropOnVehicle(v.id); }}>
+              onDragOver={isDispatched ? undefined : (e) => { e.preventDefault(); setDragOver(v.id); }}
+              onDragLeave={isDispatched ? undefined : () => setDragOver(null)}
+              onDrop={isDispatched ? undefined : () => { setDragOver(null); onDropOnVehicle(v.id); }}>
 
-              {/* Crew header */}
-              <button
-                onClick={() => { onToggleCrew(v.id); onSelectVehicle(v.id); }}
-                className="w-full flex items-center gap-2.5 px-4 py-2.5 hover:bg-slate-50 transition cursor-pointer text-left">
-                <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: v.color }} />
-                <span className="flex-1 text-xs font-bold text-slate-800 truncate">{v.name}</span>
-                <div className="flex items-center gap-2 text-[10px] text-slate-400">
-                  <span className="font-mono">{crewStops.length} stops</span>
-                  {totalMins > 0 && <span className="font-mono">{Math.round(totalMins / 60 * 10) / 10}h</span>}
-                </div>
-                {expanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
-              </button>
+              {/* Crew header row */}
+              <div className="flex items-center gap-2 px-4 py-2.5 hover:bg-slate-50 transition">
+                <button
+                  onClick={() => { onToggleCrew(v.id); onSelectVehicle(v.id); }}
+                  className="flex items-center gap-2.5 flex-1 min-w-0 text-left cursor-pointer">
+                  <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: v.color }} />
+                  <span className="flex-1 text-xs font-bold text-slate-800 truncate">{v.name}</span>
+                  <div className="flex items-center gap-2 text-[10px] text-slate-400 shrink-0">
+                    {isDispatched && crewStops.length > 0 && (
+                      <span className="font-mono text-emerald-600 font-bold">{completedStops}/{crewStops.length}</span>
+                    )}
+                    {!isDispatched && <span className="font-mono">{crewStops.length} stops</span>}
+                    {v.metrics.totalTime > 0 && (
+                      <span className="font-mono">{Math.round(v.metrics.totalTime / 60 * 10) / 10}h</span>
+                    )}
+                  </div>
+                </button>
+
+                {/* Per-vehicle dispatch controls */}
+                {routeStatus === 'built' && crewStops.length > 0 && (
+                  isDispatched ? (
+                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700 shrink-0">
+                      ✓
+                    </span>
+                  ) : (
+                    <button
+                      onClick={() => onDispatchVehicle(v.id)}
+                      disabled={!!busyVehicleId}
+                      className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-bold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white rounded-lg transition cursor-pointer shrink-0">
+                      {busyVehicleId === v.id
+                        ? <span className="w-2.5 h-2.5 border border-white border-t-transparent rounded-full animate-spin" />
+                        : <><Send className="w-2.5 h-2.5" /> Dispatch</>}
+                    </button>
+                  )
+                )}
+
+                <button
+                  onClick={() => { onToggleCrew(v.id); onSelectVehicle(v.id); }}
+                  className="cursor-pointer shrink-0 ml-1">
+                  {expanded
+                    ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
+                    : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
+                </button>
+              </div>
 
               {/* Stop list */}
               {expanded && (
@@ -601,14 +718,24 @@ function RoutesPanel({
                     <p className="text-[10px] text-slate-400 px-10 py-2 italic">
                       {routeStatus === 'unbuilt' ? 'Drag stops here or build routes' : 'No stops assigned'}
                     </p>
-                  ) : crewStops.map((stop, idx) => (
-                    <StopRow key={stop.id} stop={stop} vehicle={v} index={idx}
-                      selected={selectedStopId === stop.id}
-                      onSelect={() => onSelectStop(stop.id)}
-                      onDelete={() => onDeleteStop(stop.id)}
-                      onDragStart={() => onDragStart(stop.id, v.id)}
-                    />
-                  ))}
+                  ) : isDispatched ? (
+                    crewStops.map((stop, idx) => (
+                      <LiveStopRow key={stop.id} stop={stop} vehicle={v} index={idx}
+                        selected={selectedStopId === stop.id}
+                        onSelect={() => onSelectStop(stop.id)}
+                        onMarkCompleted={() => onMarkCompleted(stop.id)}
+                      />
+                    ))
+                  ) : (
+                    crewStops.map((stop, idx) => (
+                      <StopRow key={stop.id} stop={stop} vehicle={v} index={idx}
+                        selected={selectedStopId === stop.id}
+                        onSelect={() => onSelectStop(stop.id)}
+                        onDelete={() => onDeleteStop(stop.id)}
+                        onDragStart={() => onDragStart(stop.id, v.id)}
+                      />
+                    ))
+                  )}
                 </div>
               )}
             </div>
@@ -619,7 +746,7 @@ function RoutesPanel({
   );
 }
 
-// ── Stop Row (used in routes panel) ──────────────────────────────────────
+// ── Stop Row (planning view — draggable) ─────────────────────────────────
 function StopRow({ stop, vehicle, index, selected, onSelect, onDelete, onDragStart }: {
   stop: Stop; vehicle: Vehicle | null; index?: number;
   selected: boolean; onSelect: () => void; onDelete: () => void; onDragStart: () => void;
@@ -653,6 +780,47 @@ function StopRow({ stop, vehicle, index, selected, onSelect, onDelete, onDragSta
           className="p-1 text-slate-300 hover:text-red-500 transition cursor-pointer">
           <Trash2 className="w-3 h-3" />
         </button>
+      </div>
+    </div>
+  );
+}
+
+// ── Live Stop Row (dispatched view — mark complete) ───────────────────────
+function LiveStopRow({ stop, vehicle, index, selected, onSelect, onMarkCompleted }: {
+  stop: Stop; vehicle: Vehicle; index: number;
+  selected: boolean; onSelect: () => void; onMarkCompleted: () => void;
+  key?: string;
+}) {
+  const isCompleted = stop.status === 'Completed';
+  return (
+    <div
+      onClick={onSelect}
+      className={`flex items-center gap-2 px-4 py-2 cursor-pointer transition text-xs ${selected ? 'bg-blue-50' : 'hover:bg-slate-50'} ${isCompleted ? 'opacity-60' : ''}`}>
+      <span className="w-4 h-4 rounded-full text-[9px] font-bold flex items-center justify-center shrink-0 text-white"
+        style={{ backgroundColor: vehicle.color }}>
+        {index + 1}
+      </span>
+      <div className="flex-1 min-w-0">
+        <div className={`font-semibold truncate ${isCompleted ? 'line-through text-slate-400' : 'text-slate-800'}`}>
+          {stop.name}
+        </div>
+        <div className="text-[10px] text-slate-400 truncate">{stop.customer}</div>
+      </div>
+      <div className="flex items-center gap-1.5 shrink-0">
+        {stop.eta !== null && (
+          <span className="text-[10px] font-mono text-slate-400">{fmtTime(stop.eta)}</span>
+        )}
+        {isCompleted ? (
+          <span className="flex items-center gap-0.5 text-[10px] font-bold text-emerald-600 px-1.5">
+            <CheckCircle2 className="w-3.5 h-3.5" />
+          </span>
+        ) : (
+          <button
+            onClick={(e) => { e.stopPropagation(); onMarkCompleted(); }}
+            className="flex items-center gap-1 px-2 py-0.5 text-[10px] font-bold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-md transition cursor-pointer">
+            <CheckCircle2 className="w-3 h-3" /> Done
+          </button>
+        )}
       </div>
     </div>
   );
